@@ -52,7 +52,7 @@ export interface Run {
   serverAcked: Set<string>;
   /** opIds whose ack reached the device. */
   deviceAcked: Set<string>;
-  /** For each set op: the opIds in the writer's log at write time. */
+  /** For each created op (set or pin): the opIds in the writer's log at write time. */
   seenAtWrite: Map<string, Set<string>>;
 }
 
@@ -68,8 +68,10 @@ export function simulate(sc: Scenario, inspectionId = 'insp-1'): Run {
       run.created.set(op.opId, op);
       run.seenAtWrite.set(op.opId, seen);
     } else if (s.t === 'pin') {
+      const seen = new Set(dev.log.keys());
       const op = localPin(dev, 'tpl-hvac', s.version);
       run.created.set(op.opId, op);
+      run.seenAtWrite.set(op.opId, seen);
     } else if (s.t === 'push') {
       const sent = pick(outboxOps(dev), s.mask); // partial delivery: the rest stays in the outbox
       const acks = serverAccept(server, s.dupe ? [...sent, ...sent] : sent);

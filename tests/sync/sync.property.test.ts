@@ -182,6 +182,53 @@ describe(`sync engine properties (seed ${process.env.FC_SEED ?? 29}, ${RUNS} run
     );
   }, T);
 
+  it('LWW: the displayed value is the greatest live head by (lamport, deviceId, opId), on every replica, mid-flight and after sync', () => {
+    // Oracle order written out here, independent of compareOps, so a broken comparator or winner pick is caught.
+    const later = (a: SetOp, b: SetOp) => a.lamport !== b.lamport ? a.lamport > b.lamport : a.deviceId !== b.deviceId ? a.deviceId > b.deviceId : a.opId > b.opId;
+    const lwwHolds = (log: ReadonlyMap<string, Op>) => {
+      const state = materialize(log);
+      const version = state.pin?.templateVersion;
+      const sets = [...log.values()].filter((o): o is SetOp => o.kind === 'set');
+      for (const path of new Set(sets.map((o) => o.path))) {
+        const mine = sets.filter((o) => o.path === path);
+        const superseded = new Set(mine.flatMap((o) => o.prev));
+        const heads = mine.filter((o) => !superseded.has(o.opId));
+        const onTemplate = heads.filter((o) => version === undefined || o.templateVersion === version);
+        const pool = onTemplate.length ? onTemplate : heads;
+        const best = pool.reduce((m, o) => (later(o, m) ? o : m));
+        const f = state.fields[path];
+        if (!f || f.winner !== best.opId || JSON.stringify(f.value) !== JSON.stringify(best.value)) return false;
+        // heads are reported oldest first by the same order
+        const order = f.heads.map((h) => log.get(h.opId) as SetOp);
+        if (order.some((o, i) => i > 0 && !later(o, order[i - 1]!))) return false;
+        if (new Set(order.map((o) => o.opId)).size !== heads.length || heads.some((h) => !order.includes(h))) return false;
+      }
+      return true;
+    };
+    checkProperty(
+      'LWW winner is the greatest live head',
+      fc.property(scenarioArb, (sc) => {
+        const run = simulate(sc);
+        if (![run.server, ...run.devices].every((r) => lwwHolds(r.log))) return false;
+        finalSync(run);
+        return lwwHolds(run.server.log);
+      }),
+    );
+  }, T);
+
+  it('Lamport: every local op is stamped above every op in its writer\'s log at write time', () => {
+    checkProperty(
+      'Lamport clock exceeds everything seen',
+      fc.property(scenarioArb, (sc) => {
+        const run = simulate(sc);
+        for (const [id, op] of run.created) {
+          const seen = run.seenAtWrite.get(id)!;
+          for (const s of seen) if (op.lamport <= run.created.get(s)!.lamport) return false;
+        }
+        return true;
+      }),
+    );
+  }, T);
 });
 
 describe('sequential edits are overwrites, not conflicts', () => {

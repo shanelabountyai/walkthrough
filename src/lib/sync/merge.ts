@@ -33,18 +33,19 @@ export function headsFor(log: Log, path: string): string[] {
  * Log → state. Deterministic in the set of ops (WT-02): it depends only on op content, never on arrival order.
  * Per field: heads are the set ops nobody superseded; the displayed value is the last head by total order;
  * more than one distinct head value is a visible conflict with every head value kept (WT-03).
+ * Off-template set ops (written against a version other than the pinned one) are listed in `offTemplate`, and a
+ * head among them is never dropped: it stays in the field's heads flagged `offTemplate` and raises the conflict
+ * badge, whatever the pin rule (D-14). The displayed value prefers on-template heads.
  */
 export function materialize(log: Log): InspectionState {
   const pin = pinnedTemplate(log);
   const version = pin?.templateVersion;
   const offTemplate: string[] = [];
+  const isOff = (o: SetOp) => version !== undefined && o.templateVersion !== version;
   const byPath = new Map<string, SetOp[]>();
   for (const op of log.values()) {
     if (op.kind !== 'set') continue;
-    if (version !== undefined && op.templateVersion !== version) {
-      offTemplate.push(op.opId);
-      continue;
-    }
+    if (isOff(op)) offTemplate.push(op.opId);
     const list = byPath.get(op.path);
     if (list) list.push(op);
     else byPath.set(op.path, [op]);
@@ -53,16 +54,20 @@ export function materialize(log: Log): InspectionState {
   const conflicts: string[] = [];
   for (const path of [...byPath.keys()].sort()) {
     const sets = byPath.get(path)!;
+    // Supersession over every set op for the path — the same heads `headsFor` puts in a writer's `prev`.
     const superseded = new Set(sets.flatMap((o) => o.prev));
     const heads = sets.filter((o) => !superseded.has(o.opId)).sort(compareOps);
     // Every set op superseded is impossible (prev only names earlier ops: no cycles), but stay total anyway.
     const live = heads.length ? heads : [...sets].sort(compareOps).slice(-1);
-    const winner = live[live.length - 1]!;
-    const conflict = live.some((h) => !sameValue(h.value, winner.value));
+    const onTemplate = live.filter((h) => !isOff(h));
+    const shown = onTemplate.length ? onTemplate : live;
+    const winner = shown[shown.length - 1]!;
+    // A visible conflict: two distinct live values (WT-03), or any live answer written against another template version (D-14).
+    const conflict = live.some((h) => isOff(h) || !sameValue(h.value, winner.value));
     fields[path] = {
       value: winner.value,
       winner: winner.opId,
-      heads: live.map((h) => ({ opId: h.opId, deviceId: h.deviceId, value: h.value })),
+      heads: live.map((h) => ({ opId: h.opId, deviceId: h.deviceId, value: h.value, templateVersion: h.templateVersion, offTemplate: isOff(h) })),
       conflict,
     };
     if (conflict) conflicts.push(path);

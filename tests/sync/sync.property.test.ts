@@ -78,7 +78,7 @@ describe(`sync engine properties (seed ${process.env.FC_SEED ?? 29}, ${RUNS} run
     );
   }, T);
 
-  it('WT-03: a concurrent edit to one field is a visible conflict, never a silent overwrite', () => {
+  it('WT-03: a concurrent edit to one field is a visible conflict, never a silent overwrite (off-template ops included)', () => {
     checkProperty(
       'WT-03 no silent overwrite',
       fc.property(scenarioArb, (sc) => {
@@ -86,19 +86,55 @@ describe(`sync engine properties (seed ${process.env.FC_SEED ?? 29}, ${RUNS} run
         finalSync(run);
         const state = materialize(run.server.log);
         const version = state.pin?.templateVersion;
-        const sets = [...run.server.log.values()].filter((o): o is SetOp => o.kind === 'set' && (version === undefined || o.templateVersion === version));
+        // Every set op, whatever template version it was written against: a pin must never make an answer vanish (D-14).
+        const sets = [...run.server.log.values()].filter((o): o is SetOp => o.kind === 'set');
         for (const x of sets) {
           const field = state.fields[x.path];
           if (!field) return false;
-          const inHeads = field.heads.some((h) => h.opId === x.opId);
+          const head = field.heads.find((h) => h.opId === x.opId);
           // Oracle: x may leave the heads only if some writer had x in its log when it wrote over it.
           const overwrittenKnowingly = sets.some((y) => y.path === x.path && y.prev.includes(x.opId) && run.seenAtWrite.get(y.opId)?.has(x.opId));
-          if (!inHeads && !overwrittenKnowingly) return false;
+          if (!head && !overwrittenKnowingly) return false;
+          if (!head) continue;
+          const badged = field.conflict && state.conflicts.includes(x.path);
           // A head with a value other than the displayed one must raise the conflict badge.
-          if (inHeads && JSON.stringify(x.value) !== JSON.stringify(field.value) && !(field.conflict && state.conflicts.includes(x.path))) return false;
+          if (JSON.stringify(x.value) !== JSON.stringify(field.value) && !badged) return false;
+          // A head written against a version other than the pinned one is flagged and must raise the badge.
+          const off = version !== undefined && x.templateVersion !== version;
+          if (head.offTemplate !== off || head.templateVersion !== x.templateVersion) return false;
+          if (off && !badged) return false;
         }
-        // And the badge is never raised without two distinct live values.
-        return state.conflicts.every((p) => new Set(state.fields[p]!.heads.map((h) => JSON.stringify(h.value))).size > 1);
+        // The badge is raised exactly when a field has two distinct live values or a live off-template answer.
+        return Object.entries(state.fields).every(([p, f]) => {
+          const due = new Set(f.heads.map((h) => JSON.stringify(h.value))).size > 1 || f.heads.some((h) => h.offTemplate);
+          return due === f.conflict && due === state.conflicts.includes(p);
+        });
+      }),
+    );
+  }, T);
+
+  it('WT-03: no answer the server acknowledged ever drops out of the rendered state silently, mid-flight or after sync', () => {
+    checkProperty(
+      'WT-03 acked answers stay rendered',
+      fc.property(scenarioArb, (sc) => {
+        const run = simulate(sc);
+        const check = (r: Replica) => {
+          const state = materialize(r.log);
+          for (const id of run.serverAcked) {
+            const x = r.log.get(id);
+            if (!x || x.kind !== 'set') continue;
+            const field = state.fields[x.path];
+            if (!field) return false;
+            if (field.heads.some((h) => h.opId === id)) continue;
+            // Gone from the heads only via a write that names it in prev from a writer who had it.
+            const knowingly = [...r.log.values()].some((y) => y.kind === 'set' && y.path === x.path && y.prev.includes(id) && run.seenAtWrite.get(y.opId)?.has(id));
+            if (!knowingly) return false;
+          }
+          return true;
+        };
+        if (![run.server, ...run.devices].every(check)) return false;
+        finalSync(run);
+        return [run.server, ...run.devices].every(check);
       }),
     );
   }, T);
@@ -145,6 +181,7 @@ describe(`sync engine properties (seed ${process.env.FC_SEED ?? 29}, ${RUNS} run
       ),
     );
   }, T);
+
 });
 
 describe('sequential edits are overwrites, not conflicts', () => {

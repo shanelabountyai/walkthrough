@@ -33,20 +33,23 @@ export type Op = SetOp | PinOp;
 export type Log = ReadonlyMap<string, Op>;
 
 export interface FieldState {
-  /** Displayed value: the head with the greatest (lamport, deviceId, opId). */
+  /** Displayed value: the on-template head (any head if none is on-template) with the greatest (lamport, deviceId, opId). */
   value: Json;
   /** opId of the displayed value. */
   winner: string;
-  /** Every head (unsuperseded) op for this field, in total order, oldest first. Length > 1 only on conflict. */
-  heads: { opId: string; deviceId: string; value: Json }[];
+  /**
+   * Every head (unsuperseded) op for this field, in total order, oldest first. Length > 1 only on conflict.
+   * `offTemplate`: written against a version other than the pinned one — kept visible and badged (D-14).
+   */
+  heads: { opId: string; deviceId: string; value: Json; templateVersion: number; offTemplate: boolean }[];
   conflict: boolean;
 }
 
 export interface InspectionState {
   pin: { templateId: string; templateVersion: number; opId: string } | null;
   fields: Record<string, FieldState>;
-  /** Paths with a visible conflict, sorted — the "resolve" badge. */
+  /** Paths with a visible conflict (distinct live values, or a live off-template answer), sorted — the "resolve" badge. */
   conflicts: string[];
-  /** set ops written against a template version other than the pinned one: kept in the log, not rendered. */
+  /** set ops written against a template version other than the pinned one: kept in the log; a live one stays in its field's heads with a conflict badge (D-14). */
   offTemplate: string[];
 }

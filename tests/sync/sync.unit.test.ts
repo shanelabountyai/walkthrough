@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { appendOp, compareOps, createReplica, localPin, localSet, LogIntegrityError, logFrom, materialize, mergeLogs, observe, receive, tick, type SetOp } from '@/lib/sync';
+import { appendOp, applyAck, compareOps, createReplica, localPin, localSet, LogIntegrityError, logFrom, materialize, mergeLogs, observe, outboxOps, receive, serverAccept, tick, type SetOp } from '@/lib/sync';
 
 const set = (o: Partial<SetOp> & Pick<SetOp, 'opId' | 'deviceId' | 'lamport'>): SetOp => ({ inspectionId: 'i', kind: 'set', path: 'f', value: 1, prev: [], templateVersion: 1, ...o });
 
@@ -69,5 +69,48 @@ describe('template-version pinning', () => {
       expect(r.templateVersion).toBe(3);
     }
     expect(localSet(b, 'f', 'y').templateVersion).toBe(3);
+  });
+});
+
+describe('a late pin never hides acknowledged answers (review must-fix 1)', () => {
+  it('5 acked answers under v1, then an offline device pins v2 at lamport 1: every answer stays visible with a badge', () => {
+    const server = createReplica('server', 'insp');
+    const dev1 = createReplica('dev-1', 'insp');
+    const dev0 = createReplica('dev-0', 'insp'); // never syncs before its pin
+    localPin(dev1, 'tpl', 1);
+    const answers = [0, 1, 2, 3, 4].map((n) => localSet(dev1, `items.p${n}.answer`, `a${n}`));
+    const acked = serverAccept(server, outboxOps(dev1));
+    applyAck(dev1, acked);
+    expect(acked).toHaveLength(6);
+    expect(Object.keys(materialize(server.log).fields)).toHaveLength(5);
+
+    // dev-0 pins v2 offline at lamport 1, ahead of dev-1's pin by (lamport, deviceId): under D-12 it takes over.
+    const latePin = localPin(dev0, 'tpl', 2);
+    expect(latePin.lamport).toBe(1);
+    applyAck(dev0, serverAccept(server, outboxOps(dev0)));
+    receive(dev1, server.log.values());
+    receive(dev0, server.log.values());
+
+    for (const r of [server, dev1, dev0]) {
+      const s = materialize(r.log);
+      expect(s.pin).toMatchObject({ templateVersion: 2, opId: latePin.opId }); // the pin rule itself is unchanged (D-12 open)
+      expect(s.offTemplate).toEqual(answers.map((a) => a.opId).sort()); // still listed as off-template
+      for (const a of answers) {
+        const f = s.fields[a.path];
+        expect(f, `${a.path} vanished on ${r.id}`).toBeDefined();
+        expect(f).toMatchObject({ value: a.value, winner: a.opId, conflict: true });
+        expect(f!.heads).toEqual([{ opId: a.opId, deviceId: 'dev-1', value: a.value, templateVersion: 1, offTemplate: true }]);
+      }
+      expect(s.conflicts).toEqual(answers.map((a) => a.path).sort());
+    }
+
+    // Re-answering on the pinned version after seeing the flagged value is a clean overwrite: the badge clears.
+    const fix = localSet(dev1, 'items.p0.answer', 'a0');
+    expect(fix.templateVersion).toBe(2);
+    expect(fix.prev).toEqual([answers[0]!.opId]);
+    applyAck(dev1, serverAccept(server, outboxOps(dev1)));
+    const s = materialize(server.log);
+    expect(s.fields['items.p0.answer']).toMatchObject({ value: 'a0', conflict: false });
+    expect(s.conflicts).not.toContain('items.p0.answer');
   });
 });

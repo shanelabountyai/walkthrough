@@ -40,9 +40,11 @@ associative and idempotent by construction. The same `opId` with different conte
 the displayed winner.
 
 **Template-version pinning.** The first `pin` op by total order fixes the inspection's template version,
-regardless of arrival order. `set` ops written against another version stay in the log (never lost) but
-are excluded from the state and listed as `offTemplate`, so the inspection always renders against the
-pinned version (WT-04, enforced in Phase 2/3 rendering; the engine provides the data).
+regardless of arrival order (D-12, open for Shane). `set` ops written against another version stay in the log
+(never lost) and are listed as `offTemplate`. The form renders against the pinned version (WT-04, enforced in
+Phase 2/3 rendering; the engine provides the data), but a live off-template answer is never dropped from the
+state: it stays in its field's `heads` flagged `offTemplate` and raises the conflict badge until someone
+re-answers it on the pinned version (D-14). This holds whatever pin rule D-12 settles on.
 
 **Device / server simulation** (`device.ts`): `localSet`, `push` (returns ops the server acknowledged),
 `pull`. Ack = the server's log contains the op; a device may drop its outbox entry only after the ack.

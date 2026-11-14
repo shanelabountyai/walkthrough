@@ -1,0 +1,94 @@
+// Walkthrough (#29) Phase 2: checklist templates, inspections and the server copy of each inspection's op log.
+// Clone-owned. docs/walkthrough/PHASE2_PLAN.md. Every model has orgId, so RLS (INV-30), fixtures (INV-29) and
+// an export decision (INV-34) cover it.
+
+/// A named checklist template. Its content lives in immutable TemplateVersion rows.
+model ChecklistTemplate {
+  id          String            @id @default(uuid()) @db.Uuid
+  orgId       String            @db.Uuid
+  org         Org               @relation(fields: [orgId], references: [id], onDelete: Cascade)
+  name        String
+  createdById String            @db.Uuid
+  createdAt   DateTime          @default(now()) @db.Timestamptz(6)
+  versions    TemplateVersion[]
+  inspections Inspection[]
+
+  @@index([orgId])
+}
+
+/// One published template definition. Never updated (trigger "TemplateVersion_immutable", WT-04): a change is version n+1.
+model TemplateVersion {
+  id          String            @id @default(uuid()) @db.Uuid
+  orgId       String            @db.Uuid
+  org         Org               @relation(fields: [orgId], references: [id], onDelete: Cascade)
+  templateId  String            @db.Uuid
+  template    ChecklistTemplate @relation(fields: [templateId], references: [id], onDelete: Cascade)
+  version     Int
+  definition  Json
+  createdById String            @db.Uuid
+  createdAt   DateTime          @default(now()) @db.Timestamptz(6)
+  inspections Inspection[]
+
+  @@unique([templateId, version])
+  @@index([orgId])
+}
+
+/// An inspection. The template version is pinned by the server when the inspection is created (D-15): the pin op is
+/// InspectionOp seq 1, and templateVersionId/templateVersion mirror it for queries.
+model Inspection {
+  id                String            @id @default(uuid()) @db.Uuid
+  orgId             String            @db.Uuid
+  org               Org               @relation(fields: [orgId], references: [id], onDelete: Cascade)
+  templateId        String            @db.Uuid
+  template          ChecklistTemplate @relation(fields: [templateId], references: [id], onDelete: Cascade)
+  templateVersionId String            @db.Uuid
+  pinnedVersion     TemplateVersion   @relation(fields: [templateVersionId], references: [id], onDelete: Cascade)
+  templateVersion   Int
+  title             String
+  assigneeId        String            @db.Uuid // the technician (WT-05); no FK, like OrgExport.requestedById
+  createdById       String            @db.Uuid
+  clock             Int               @default(0) // the server replica's Lamport clock
+  opSeq             Int               @default(0) // last InspectionOp.seq handed out
+  conflictPaths     String[]          @default([]) // cached materialize().conflicts, for list badges
+  createdAt         DateTime          @default(now()) @db.Timestamptz(6)
+  updatedAt         DateTime          @updatedAt @db.Timestamptz(6)
+  ops               InspectionOp[]
+
+  @@index([orgId, assigneeId])
+}
+
+/// The server's copy of one op (src/lib/sync Op). Append-only: trigger "InspectionOp_append_only" refuses UPDATE (WT-01).
+model InspectionOp {
+  id              String     @id @default(uuid()) @db.Uuid
+  orgId           String     @db.Uuid
+  org             Org        @relation(fields: [orgId], references: [id], onDelete: Cascade)
+  inspectionId    String     @db.Uuid
+  inspection      Inspection @relation(fields: [inspectionId], references: [id], onDelete: Cascade)
+  seq             Int // server receive order within the inspection: the pull cursor
+  opId            String
+  deviceId        String
+  lamport         Int
+  kind            String // set | pin
+  path            String? // set
+  value           Json? // set (JSON null is stored as a JSON null, not SQL NULL)
+  prev            String[]   @default([]) // set
+  templateId      String?    @db.Uuid // pin
+  templateVersion Int
+  userId          String?    @db.Uuid // who pushed it; null for the server's own ops
+  receivedAt      DateTime   @default(now()) @db.Timestamptz(6)
+
+  @@unique([inspectionId, opId])
+  @@unique([inspectionId, seq])
+  @@index([orgId])
+}
+
+/// A device id (minted by the client) bound to the first user who pushed from it in this org (D-20).
+model SyncDevice {
+  orgId     String   @db.Uuid
+  org       Org      @relation(fields: [orgId], references: [id], onDelete: Cascade)
+  id        String   @db.Uuid
+  userId    String   @db.Uuid
+  createdAt DateTime @default(now()) @db.Timestamptz(6)
+
+  @@id([orgId, id])
+}

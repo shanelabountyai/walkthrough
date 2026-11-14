@@ -39,12 +39,17 @@ associative and idempotent by construction. The same `opId` with different conte
 "A and B both answered offline" (conflict). Lamport order alone cannot tell those apart; it only picks
 the displayed winner.
 
-**Template-version pinning.** The first `pin` op by total order fixes the inspection's template version,
-regardless of arrival order (D-12, open for Shane). `set` ops written against another version stay in the log
-(never lost) and are listed as `offTemplate`. The form renders against the pinned version (WT-04, enforced in
-Phase 2/3 rendering; the engine provides the data), but a live off-template answer is never dropped from the
-state: it stays in its field's `heads` flagged `offTemplate` and raises the conflict badge until someone
-re-answers it on the pinned version (D-14). This holds whatever pin rule D-12 settles on.
+**Template-version pinning.** The server pins the template version when it creates the inspection
+(`createInspection`), so the `pin` op exists before any device op, and an inspection keeps the version it
+started on (D-15, decided by Shane 2026-11-14; supersedes D-12). Devices can't change the pin: a device gets
+the pin when it downloads the inspection and can't write before then (`PinError('not-created')`); a device
+pin is rejected with `PinError('device-pin')`, both from `createInspection` on a device and from
+`serverAccept`, which refuses the whole batch and stores nothing; and `pinnedTemplate` ignores any pin not
+issued by the server. `set` ops written against another version (a stale client) stay in the log (never lost)
+and are listed as `offTemplate`. The form renders against the pinned version (WT-04, enforced in Phase 2/3
+rendering; the engine provides the data), but a live off-template answer is never dropped from the state: it
+stays in its field's `heads` flagged `offTemplate` and raises the conflict badge until someone re-answers it on
+the pinned version (D-14).
 
 **Device / server simulation** (`device.ts`): `localSet`, `push` (returns ops the server acknowledged),
 `pull`. Ack = the server's log contains the op; a device may drop its outbox entry only after the ack.
@@ -62,7 +67,7 @@ re-answers it on the pinned version (D-14). This holds whatever pin rule D-12 se
 ## Property tests (fast-check, seeded)
 
 A generator builds random *scenarios*: 2–4 devices, 1–6 field paths, 1–40 steps drawn from local edits,
-pushes, pulls, dropped/duplicated/reordered deliveries and template pins.
+pushes, pulls, dropped/duplicated/reordered deliveries and a server-issued pin plus rejected device pin attempts (D-15).
 
 - **WT-01** — after any scenario, every op the server ever acknowledged is in the server log and, after one
   final full sync, in every device's log; `mergeLogs(a, b) ⊇ a ∪ b` for any logs.

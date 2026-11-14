@@ -54,7 +54,7 @@ and badged (D-14), never dropped.
 | A4 | Creating an inspection writes the server pin (D-15) as op seq 1; the inspection keeps that version when the template moves on (WT-04) | `inspections.int.test.ts` |
 | A5 | Sync endpoint: push acks exactly what is durable; retry is idempotent; pull returns ops after the cursor | `sync.int.test.ts` |
 | A6 | Device pin, forged/foreign ops, opId reuse with different content, unbound device → whole batch refused, nothing stored | `sync.int.test.ts` |
-| A7 | WT-01/02/03 hold through the real endpoint and Postgres: random multi-device scenarios with lost acks, duplicates and reordering | `sync.db.property.test.ts` (fast-check, seed 29, `FC_DB_RUNS` default 40) |
+| A7 | WT-01/02/03 hold through the real endpoint and Postgres: random multi-device scenarios with lost acks, duplicates and reordering | `sync.db.property.test.ts` (fast-check, seed 29, `FC_DB_RUNS` default 100) |
 | A8 | WT-04 render uses the pinned version; stale-client answers stay visible and badged | `render.unit.test.ts`, `inspections.int.test.ts` |
 | A9 | WT-05: a technician reads/syncs only inspections assigned to them; others get the nonexistent-id 404 | `access.int.test.ts` |
 | A10 | Op log is append-only in the database | `sync.int.test.ts` (trigger refuses UPDATE) |

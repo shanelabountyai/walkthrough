@@ -1,7 +1,7 @@
 // WT-01, WT-02, WT-03 as fast-check properties over random multi-device sync interleavings (seeded: FC_SEED, FC_RUNS).
 import { describe, expect, it } from 'vitest';
 import fc from 'fast-check';
-import { applyAck, createReplica, localSet, outboxOps, serverAccept, logFrom, materialize, mergeLogs, receive, type Op, type SetOp } from '@/lib/sync';
+import { applyAck, createReplica, localSet, outboxOps, serverAccept, logFrom, materialize, mergeLogs, receive, type Op, type Replica, type SetOp } from '@/lib/sync';
 import { checkProperty, finalSync, RUNS, scenarioArb, shuffle, simulate } from './harness';
 
 const ids = (log: ReadonlyMap<string, Op>) => [...log.keys()].sort();
@@ -55,7 +55,7 @@ describe(`sync engine properties (seed ${process.env.FC_SEED ?? 29}, ${RUNS} run
         return orders.every((order, i) => {
           const fresh = createReplica(`fresh-${i}`, 'insp-1');
           const shuffled = shuffle(ops, order);
-          const size = 1 + (batches[i] % Math.max(1, shuffled.length)); // deliver in random-size batches
+          const size = 1 + (batches[i]! % Math.max(1, shuffled.length)); // deliver in random-size batches
           for (let j = 0; j < shuffled.length; j += size) receive(fresh, shuffled.slice(j, j + size));
           return JSON.stringify(materialize(fresh.log)) === expected;
         });
@@ -69,8 +69,8 @@ describe(`sync engine properties (seed ${process.env.FC_SEED ?? 29}, ${RUNS} run
       fc.property(scenarioArb, fc.array(fc.integer({ min: 0, max: 2 }), { maxLength: 60 }), (sc, assign) => {
         const run = simulate(sc);
         const parts: Op[][] = [[], [], []];
-        [...run.created.values()].forEach((op, i) => parts[assign.length ? assign[i % assign.length] : i % 3].push(op));
-        const [a, b, c] = parts.map(logFrom);
+        [...run.created.values()].forEach((op, i) => parts[assign.length ? assign[i % assign.length]! : i % 3]!.push(op));
+        const [a, b, c] = parts.map(logFrom) as [Map<string, Op>, Map<string, Op>, Map<string, Op>];
         const same = (x: ReadonlyMap<string, Op>, y: ReadonlyMap<string, Op>) =>
           ids(x).join() === ids(y).join() && JSON.stringify(materialize(x)) === JSON.stringify(materialize(y));
         return same(mergeLogs(a, b), mergeLogs(b, a)) && same(mergeLogs(mergeLogs(a, b), c), mergeLogs(a, mergeLogs(b, c))) && same(mergeLogs(a, a), a);
@@ -98,7 +98,7 @@ describe(`sync engine properties (seed ${process.env.FC_SEED ?? 29}, ${RUNS} run
           if (inHeads && JSON.stringify(x.value) !== JSON.stringify(field.value) && !(field.conflict && state.conflicts.includes(x.path))) return false;
         }
         // And the badge is never raised without two distinct live values.
-        return state.conflicts.every((p) => new Set(state.fields[p].heads.map((h) => JSON.stringify(h.value))).size > 1);
+        return state.conflicts.every((p) => new Set(state.fields[p]!.heads.map((h) => JSON.stringify(h.value))).size > 1);
       }),
     );
   }, T);
@@ -115,7 +115,7 @@ describe(`sync engine properties (seed ${process.env.FC_SEED ?? 29}, ${RUNS} run
         (base, va, vb, aPushesFirst, order) => {
           fc.pre(va !== vb);
           const run = simulate({ devices: 2, steps: [] });
-          const [a, b] = run.devices;
+          const [a, b] = run.devices as [Replica, Replica];
           const path = 'items.roof.answer';
           // Common starting point: A answers, both devices sync.
           const baseOp = localSet(a, path, base);
@@ -130,7 +130,7 @@ describe(`sync engine properties (seed ${process.env.FC_SEED ?? 29}, ${RUNS} run
           finalSync(run);
           for (const r of [run.server, a, b]) {
             const st = materialize(new Map(shuffle([...r.log.entries()], order)));
-            const f = st.fields[path];
+            const f = st.fields[path]!;
             const vals = f.heads.map((h) => h.value);
             if (!f.conflict || !vals.includes(va) || !vals.includes(vb)) return false;
           }
@@ -138,7 +138,7 @@ describe(`sync engine properties (seed ${process.env.FC_SEED ?? 29}, ${RUNS} run
           localSet(b, path, vb);
           finalSync(run);
           return [run.server, a, b].every((r) => {
-            const f = materialize(r.log).fields[path];
+            const f = materialize(r.log).fields[path]!;
             return !f.conflict && f.heads.length === 1 && f.value === vb;
           });
         },
@@ -150,12 +150,12 @@ describe(`sync engine properties (seed ${process.env.FC_SEED ?? 29}, ${RUNS} run
 describe('sequential edits are overwrites, not conflicts', () => {
   it('B edits after pulling A: B wins, no badge', () => {
     const run = simulate({ devices: 2, steps: [] });
-    const [a, b] = run.devices;
+    const [a, b] = run.devices as [Replica, Replica];
     localSet(a, 'f', 'pass');
     finalSync(run);
     localSet(b, 'f', 'fail');
     finalSync(run);
-    const f = materialize(a.log).fields.f;
+    const f = materialize(a.log).fields.f!;
     expect(f).toMatchObject({ value: 'fail', conflict: false });
     expect(f.heads).toHaveLength(1);
   });

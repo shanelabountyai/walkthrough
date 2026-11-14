@@ -5,12 +5,12 @@ import type { FieldState, InspectionState, Json, Log, Op, PinOp, SetOp } from '.
 export function sameValue(a: Json, b: Json): boolean {
   if (a === b) return true;
   if (Array.isArray(a) || Array.isArray(b)) {
-    return Array.isArray(a) && Array.isArray(b) && a.length === b.length && a.every((x, i) => sameValue(x, b[i]));
+    return Array.isArray(a) && Array.isArray(b) && a.length === b.length && a.every((x, i) => sameValue(x, b[i] as Json));
   }
   if (a && b && typeof a === 'object' && typeof b === 'object') {
     const ka = Object.keys(a).sort();
     const kb = Object.keys(b).sort();
-    return ka.length === kb.length && ka.every((k, i) => k === kb[i] && sameValue(a[k], b[k]));
+    return ka.length === kb.length && ka.every((k, i) => k === kb[i] && sameValue(a[k] as Json, b[k] as Json));
   }
   return false;
 }
@@ -57,7 +57,7 @@ export function materialize(log: Log): InspectionState {
     const heads = sets.filter((o) => !superseded.has(o.opId)).sort(compareOps);
     // Every set op superseded is impossible (prev only names earlier ops: no cycles), but stay total anyway.
     const live = heads.length ? heads : [...sets].sort(compareOps).slice(-1);
-    const winner = live[live.length - 1];
+    const winner = live[live.length - 1]!;
     const conflict = live.some((h) => !sameValue(h.value, winner.value));
     fields[path] = {
       value: winner.value,

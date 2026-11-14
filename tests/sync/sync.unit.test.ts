@@ -38,13 +38,13 @@ describe('materialize', () => {
   it('keeps both values and raises the badge for concurrent writes; LWW picks the displayed one', () => {
     const s = materialize(logFrom([set({ opId: 'a:1', deviceId: 'a', lamport: 1, value: 'pass' }), set({ opId: 'b:1', deviceId: 'b', lamport: 1, value: 'fail' })]));
     expect(s.conflicts).toEqual(['f']);
-    expect(s.fields.f.value).toBe('fail'); // same clock: deviceId 'b' > 'a'
-    expect(s.fields.f.heads.map((h) => h.value)).toEqual(['pass', 'fail']);
+    expect(s.fields.f!.value).toBe('fail'); // same clock: deviceId 'b' > 'a'
+    expect(s.fields.f!.heads.map((h) => h.value)).toEqual(['pass', 'fail']);
   });
   it('concurrent writes of the same value are not a conflict (D-09)', () => {
     const s = materialize(logFrom([set({ opId: 'a:1', deviceId: 'a', lamport: 1, value: 'pass' }), set({ opId: 'b:1', deviceId: 'b', lamport: 4, value: 'pass' })]));
     expect(s.conflicts).toEqual([]);
-    expect(s.fields.f.heads).toHaveLength(2);
+    expect(s.fields.f!.heads).toHaveLength(2);
   });
   it('a write naming the old value in prev is an overwrite even with a lower clock', () => {
     const s = materialize(logFrom([set({ opId: 'a:1', deviceId: 'a', lamport: 9, value: 'pass' }), set({ opId: 'b:1', deviceId: 'b', lamport: 2, value: 'fail', prev: ['a:1'] })]));

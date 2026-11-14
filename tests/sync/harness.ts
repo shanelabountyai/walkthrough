@@ -34,9 +34,9 @@ export const scenarioArb: fc.Arbitrary<Scenario> = fc.integer({ min: 2, max: MAX
 export function shuffle<T>(items: T[], keys: number[]): T[] {
   const a = [...items];
   for (let i = a.length - 1; i > 0; i--) {
-    const k = keys.length ? keys[i % keys.length] + i : i;
+    const k = keys.length ? keys[i % keys.length]! + i : i;
     const j = k % (i + 1);
-    [a[i], a[j]] = [a[j], a[i]];
+    [a[i], a[j]] = [a[j]!, a[i]!];
   }
   return a;
 }
@@ -61,7 +61,7 @@ export function simulate(sc: Scenario, inspectionId = 'insp-1'): Run {
   const devices = Array.from({ length: sc.devices }, (_, i) => createReplica(`dev-${i}`, inspectionId));
   const run: Run = { server, devices, created: new Map(), serverAcked: new Set(), deviceAcked: new Set(), seenAtWrite: new Map() };
   for (const s of sc.steps) {
-    const dev = devices[s.d];
+    const dev = devices[s.d]!;
     if (s.t === 'edit') {
       const seen = new Set(dev.log.keys());
       const op = localSet(dev, `items.p${s.path}.answer`, s.value);

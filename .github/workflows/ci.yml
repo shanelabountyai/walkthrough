@@ -20,10 +20,10 @@ jobs:
       PGHOST: localhost
       PGUSER: postgres
       PGPASSWORD: postgres
-      DATABASE_URL: postgresql://postgres:postgres@localhost:5432/saas_foundation_test?connection_limit=10&pool_timeout=20
-      DIRECT_URL: postgresql://postgres:postgres@localhost:5432/saas_foundation_test?connection_limit=10&pool_timeout=20
+      DATABASE_URL: postgresql://postgres:postgres@localhost:5432/walkthrough_test?connection_limit=10&pool_timeout=20
+      DIRECT_URL: postgresql://postgres:postgres@localhost:5432/walkthrough_test?connection_limit=10&pool_timeout=20
       AUTH_SECRET: ci-only-secret-not-for-real-use-0123456789abc
-      APP_URL: http://localhost:4100
+      APP_URL: http://localhost:8200
     services:
       postgres:
         image: postgres:17
@@ -46,7 +46,7 @@ jobs:
       - run: npm ci
       - run: npm run lint
       - run: npm run typecheck
-      - run: createdb saas_foundation_test
+      - run: createdb walkthrough_test
       - run: npx prisma migrate deploy
       - name: RLS enforce leg — app role, system URL
         if: matrix.rls == 'enforce'

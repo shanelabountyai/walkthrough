@@ -1,4 +1,4 @@
-import { readFileSync } from 'node:fs';
+import { existsSync, readFileSync } from 'node:fs';
 import { describe, expect, it } from 'vitest';
 import { drift, hashOf, patchedHash, type Change } from '../../scripts/foundation-drift';
 import { MARKED_FILES, MODULES, modulesToRemove } from '../../scripts/foundation-modules';
@@ -131,6 +131,8 @@ describe('rls:policies module guard (F-09)', () => {
       const guarded = policySql([t]).includes(`to_regclass('"${t.table}"')`);
       expect([t.table, guarded]).toEqual([t.table, Boolean(t.module)]);
     }
-    expect([...new Set(tables.map((t) => t.module).filter(Boolean))].sort()).toEqual(Object.keys(MODULES).sort());
+    // Walkthrough (D-13): compare against the modules this clone still has; billing was removed (D-0B).
+    const present = Object.keys(MODULES).filter((m) => existsSync(MODULES[m]![0]!));
+    expect([...new Set(tables.map((t) => t.module).filter(Boolean))].sort()).toEqual(present.sort());
   });
 });

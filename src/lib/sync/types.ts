@@ -21,7 +21,13 @@ export interface SetOp extends OpBase {
   prev: string[];
 }
 
-/** Pin the template version an inspection renders against. The first pin by total order wins. */
+/** The replica id (and op `deviceId`) of the server. Only the server issues pins (D-15). */
+export const SERVER_ID = 'server';
+
+/**
+ * Pin the template version an inspection renders against. Issued by the server when the inspection is created,
+ * before any device op exists; devices can't create or change it (D-15). `templateVersion` is the pinned version.
+ */
 export interface PinOp extends OpBase {
   kind: 'pin';
   templateId: string;
@@ -46,6 +52,7 @@ export interface FieldState {
 }
 
 export interface InspectionState {
+  /** The server-issued pin (D-15). A pin op from any other writer is ignored here and rejected by `serverAccept`. */
   pin: { templateId: string; templateVersion: number; opId: string } | null;
   fields: Record<string, FieldState>;
   /** Paths with a visible conflict (distinct live values, or a live off-template answer), sorted — the "resolve" badge. */

@@ -216,6 +216,25 @@ describe(`sync engine properties (seed ${process.env.FC_SEED ?? 29}, ${RUNS} run
     );
   }, T);
 
+  it('D-15: the pin is the server-issued one on every replica, mid-flight and after sync; device pins are rejected', () => {
+    checkProperty(
+      'D-15 server-issued pin never changes',
+      fc.property(scenarioArb, (sc) => {
+        const run = simulate(sc);
+        const pinned = (r: Replica) => {
+          const p = materialize(r.log).pin;
+          return p?.opId === run.pin.opId && p.templateVersion === run.pin.templateVersion;
+        };
+        if (run.pinViolations.length) return false;
+        if (![run.server, ...run.devices].every(pinned)) return false;
+        // No pin op from anyone but the server reaches any log.
+        if ([run.server, ...run.devices].some((r) => [...r.log.values()].some((o) => o.kind === 'pin' && o.opId !== run.pin.opId))) return false;
+        finalSync(run);
+        return [run.server, ...run.devices].every((r) => pinned(r) && r.templateVersion === run.pin.templateVersion);
+      }),
+    );
+  }, T);
+
   it('Lamport: every local op is stamped above every op in its writer\'s log at write time', () => {
     checkProperty(
       'Lamport clock exceeds everything seen',
@@ -223,7 +242,7 @@ describe(`sync engine properties (seed ${process.env.FC_SEED ?? 29}, ${RUNS} run
         const run = simulate(sc);
         for (const [id, op] of run.created) {
           const seen = run.seenAtWrite.get(id)!;
-          for (const s of seen) if (op.lamport <= run.created.get(s)!.lamport) return false;
+          for (const s of seen) if (op.lamport <= (run.created.get(s) ?? run.server.log.get(s))!.lamport) return false;
         }
         return true;
       }),

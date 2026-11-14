@@ -1,5 +1,5 @@
 import { compareOps } from './clock';
-import type { FieldState, InspectionState, Json, Log, Op, PinOp, SetOp } from './types';
+import { SERVER_ID, type FieldState, type InspectionState, type Json, type Log, type Op, type PinOp, type SetOp } from './types';
 
 /** Value equality for JSON values (object key order independent). */
 export function sameValue(a: Json, b: Json): boolean {
@@ -15,10 +15,16 @@ export function sameValue(a: Json, b: Json): boolean {
   return false;
 }
 
-/** The pinned template: the first pin op by total order, whatever order the ops arrived in. */
+/**
+ * The pinned template: the server-issued pin op written when the inspection was created (D-15). A pin op from a
+ * device is never authoritative: `serverAccept` rejects it, and if one is in a log anyway it is ignored here.
+ * The server issues exactly one; the min by total order only keeps this total and order-independent.
+ */
 export function pinnedTemplate(log: Log): PinOp | null {
   let first: PinOp | null = null;
-  for (const op of log.values()) if (op.kind === 'pin' && (!first || compareOps(op, first) < 0)) first = op;
+  for (const op of log.values()) {
+    if (op.kind === 'pin' && op.deviceId === SERVER_ID && (!first || compareOps(op, first) < 0)) first = op;
+  }
   return first;
 }
 

@@ -6,6 +6,27 @@ export class LogIntegrityError extends Error {
   }
 }
 
+/**
+ * A template pin the engine refuses (D-15):
+ * - `device-pin`: a device tried to create or push a pin — only the server pins, at inspection creation.
+ * - `already-created`: the server already pinned this inspection; the pin never changes.
+ * - `not-created`: an op for an inspection with no server pin yet (a device writes only after it has the pin).
+ */
+export class PinError extends Error {
+  constructor(
+    readonly reason: 'device-pin' | 'already-created' | 'not-created',
+    readonly opId?: string,
+  ) {
+    super(
+      reason === 'device-pin'
+        ? `pin ${opId ?? ''} rejected: only the server pins the template version, when the inspection is created`
+        : reason === 'already-created'
+          ? 'inspection already has its server-issued pin; the pin never changes'
+          : 'inspection has no server-issued pin yet: receive it before writing or pushing ops',
+    );
+  }
+}
+
 /** Canonical form for comparing two copies of an op (key order independent). */
 function canonical(v: unknown): string {
   if (Array.isArray(v)) return `[${v.map(canonical).join(',')}]`;

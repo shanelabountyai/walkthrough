@@ -1,6 +1,6 @@
 // The field app's sync client (Phase 3). The device is a Phase 1 `Replica` whose state lives in IndexedDB; the only
 // server is the Phase 2 endpoint. Nothing here touches the DOM, so it runs in vitest against fake-indexeddb.
-import { appendOp, applyAck, createReplica, localSet, outboxOps, pinnedTemplate, receive, type Json, type Op, type Replica } from '@/lib/sync';
+import { appendOp, applyAck, createReplica, localSet, outboxOps, pinnedTemplate, receive, type Json, type Op, type Replica, type SetOp } from '@/lib/sync';
 import type { TemplateDefinition } from '@/lib/walkthrough/template';
 import { getMeta, inTx, listInspections, readInspection, req, setMeta, type StoredInspection } from './db';
 
@@ -52,7 +52,7 @@ export async function loadReplica(db: IDBDatabase, id: string): Promise<{ meta: 
  * (`add`, so an opId that already exists aborts instead of overwriting): an answer is either durable and queued, or
  * it never happened. Returns the op.
  */
-export function answer(db: IDBDatabase, id: string, path: string, value: Json): Promise<Op> {
+export function answer(db: IDBDatabase, id: string, path: string, value: Json): Promise<SetOp> {
   return serial(id, async () => {
     const got = await loadReplica(db, id);
     if (!got) throw new Error('inspection is not on this device');

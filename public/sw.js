@@ -46,7 +46,12 @@ async function shell(request) {
     if (res.ok) await cache.put(SHELL, res.clone());
     return res;
   } catch {
-    return (await cache.match(SHELL)) || Response.error();
+    const hit = await cache.match(SHELL);
+    if (!hit) return Response.error();
+    // Marked, so a test (and anyone in devtools) can tell an offline open came from this cache.
+    const headers = new Headers(hit.headers);
+    headers.set('x-walkthrough-cache', 'hit');
+    return new Response(hit.body, { status: hit.status, statusText: hit.statusText, headers });
   }
 }
 

@@ -31,5 +31,7 @@ export async function seedApp(org: { orgId: string; userId: string }, key: 'a' |
   const hash = `sha256:${createHash('sha256').update(`${orgId}:report`).digest('hex')}`;
   await db.storedBlob.create({ data: { orgId, hash, size: 1, contentType: 'application/pdf', received: 1, complete: true } });
   await db.inspectionReport.create({ data: { id: idFor(orgId, 'report'), orgId, inspectionId, number: 1, hash, size: 1, opSeq: 2, createdById: userId } });
+  // D-40: the inspection's link to that blob, so INV-29 has InspectionBlob rows to scope.
+  await db.inspectionBlob.create({ data: { orgId, inspectionId, blobHash: hash, received: 1, linked: true, linkedAt: new Date(), createdById: userId } });
   return { checklistTemplate: templateId, inspection: inspectionId };
 }

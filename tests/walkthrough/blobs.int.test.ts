@@ -220,6 +220,16 @@ describe('who can reach a blob (C4, WT-05)', () => {
     expect((await chunk(w.slug, w.inspectionId, unnamed, BLUE_PNG, 0, BLUE_PNG.length, 'image/png')).status).toBe(404);
     expect(await db.storedBlob.count({ where: { hash: unnamed } })).toBe(0);
     expect((await status(w.slug, w.inspectionId, 'sha256:nothex')).status).toBe(404);
+    // Review fix 2026-11-16 (should-fix 7): another org. Tech A is a member there too, and asks for this org's
+    // inspection under that org's slug: the same 404 for status, read and upload, and nothing is stored there.
+    const other = await db.org.create({ data: { slug: 'globex', name: 'globex' } });
+    await db.membership.create({ data: { orgId: other.id, userId: w.techA.id, role: 'member' } });
+    expect((await status(w.slug, w.inspectionId, w.hash)).status).toBe(200); // control: reachable in its own org
+    expect(await status(other.slug, w.inspectionId, w.hash)).toEqual({ status: 404, body: { error: 'not_found' } });
+    expect((await download(other.slug, w.inspectionId, w.hash)).status).toBe(404);
+    expect(await chunk(other.slug, w.inspectionId, w.hash, RED_JPEG, 0, RED_JPEG.length)).toEqual({ status: 404, body: { error: 'not_found' } });
+    expect(await db.storedBlob.count({ where: { orgId: other.id } })).toBe(0);
+    expect(await db.inspectionBlob.count({ where: { orgId: other.id } })).toBe(0);
   });
 });
 

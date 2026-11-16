@@ -25,6 +25,7 @@ import {
   type Op,
 } from '@/lib/sync';
 import { definitionSchema, parseDefinition, type TemplateDefinition } from './template';
+import { truckrollLink } from './truckroll';
 
 // ---- roles (D-16): managers are owner/admin (the template's org.update); a technician is whoever is assigned.
 
@@ -192,12 +193,12 @@ export async function syncPull(ctx: OrgCtx, inspectionId: string, since: number)
     async (tx) => {
       const insp = await tx.inspection.findFirst({
         where: { id: inspectionId, ...visibleTo(ctx) },
-        select: { id: true, title: true, templateId: true, templateVersion: true, assigneeId: true, opSeq: true, conflictPaths: true, pinnedVersion: { select: { definition: true } } },
+        select: { id: true, title: true, templateId: true, templateVersion: true, assigneeId: true, opSeq: true, conflictPaths: true, createdAt: true, pinnedVersion: { select: { definition: true } } },
       });
       if (!insp) return null;
       const ops = await opsAfter(tx, ctx, insp.id, since);
       return {
-        inspection: { id: insp.id, title: insp.title, templateId: insp.templateId, templateVersion: insp.templateVersion, assigneeId: insp.assigneeId },
+        inspection: { id: insp.id, title: insp.title, templateId: insp.templateId, templateVersion: insp.templateVersion, assigneeId: insp.assigneeId, truckroll: truckrollLink(ctx.slug, insp.createdAt) },
         template: { version: insp.templateVersion, definition: definitionSchema.parse(insp.pinnedVersion.definition) },
         ops,
         cursor: insp.opSeq,

@@ -286,6 +286,54 @@ describe('photos and signatures on the device (C5)', () => {
   });
 });
 
+// Review fix 2026-11-16 (must-fix 1, D-39): adding or removing a photo while the photo item is in conflict builds the
+// new list from every competing value, never from the displayed one alone — no photo is silently dropped (D-36, WT-03).
+describe('photos added or removed during a conflict (D-39)', () => {
+  async function conflicted() {
+    const srv = memServer();
+    const [a, b] = [await fresh(), await fresh()];
+    for (const d of [a, b]) expect((await syncAll(d, srv.transport, 'acme')).ok).toBe(true);
+    const pa = await attachPhoto(a, ID, 'items.roof-photo', image(400, 11), 'image/jpeg');
+    const pb = await attachPhoto(b, ID, 'items.roof-photo', image(400, 12), 'image/jpeg');
+    for (const d of [a, b, a]) expect((await syncAll(d, srv.transport, 'acme')).ok).toBe(true);
+    const state = materialize((await loadReplica(b, ID))!.replica.log);
+    expect(state.conflicts).toEqual(['items.roof-photo']);
+    return { ...srv, a, b, pa, pb };
+  }
+
+  it('two devices each add a photo, both sync, B adds a third: all three are kept and the conflict is resolved', async () => {
+    const { a, b, pa, pb, transport } = await conflicted();
+    const third = await attachPhoto(b, ID, 'items.roof-photo', image(400, 13), 'image/jpeg');
+    const value = third.op.value as string[];
+    expect(value).toHaveLength(3);
+    expect(new Set(value)).toEqual(new Set([pa.hash, pb.hash, third.hash]));
+    expect(value[2]).toBe(third.hash); // the new photo goes last
+    for (const d of [b, a]) expect((await syncAll(d, transport, 'acme')).ok).toBe(true);
+    for (const d of [a, b]) {
+      const s = materialize((await loadReplica(d, ID))!.replica.log);
+      expect(s.conflicts).toEqual([]);
+      expect(new Set(s.fields['items.roof-photo']!.value as string[])).toEqual(new Set([pa.hash, pb.hash, third.hash]));
+    }
+  });
+
+  it('removing one photo during the conflict keeps every other competing photo', async () => {
+    const { a, b, pa, pb, transport } = await conflicted();
+    const op = await removePhoto(b, ID, 'items.roof-photo', pb.hash);
+    expect(op.value).toEqual([pa.hash]); // A's photo survives, though B was showing its own list
+    const op2 = await removePhoto(a, ID, 'items.roof-photo', pa.hash);
+    expect(op2.value).toEqual([pb.hash]);
+    for (const d of [b, a, b]) await syncAll(d, transport, 'acme');
+  });
+
+  it('the union is stable: competing lists merge oldest head first, each in its own order, without duplicates', async () => {
+    const { a, b, pa, pb } = await conflicted();
+    const [x, y] = [await attachPhoto(a, ID, 'items.roof-photo', image(300, 21), 'image/jpeg'), await attachPhoto(b, ID, 'items.roof-photo', image(300, 22), 'image/jpeg')];
+    // each device saw both heads, so both lists hold pa and pb in the same order, then their own new photo
+    expect((x.op.value as string[]).slice(0, 2)).toEqual((y.op.value as string[]).slice(0, 2));
+    expect(new Set((x.op.value as string[]).slice(0, 2))).toEqual(new Set([pa.hash, pb.hash]));
+  });
+});
+
 describe('IndexedDB upgrade (C5)', () => {
   it('a version 1 database (Phase 3) opens as version 2 with its inspections, ops and outbox intact', async () => {
     const name = `wt-${randomUUID()}`;

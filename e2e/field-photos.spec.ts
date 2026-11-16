@@ -1,7 +1,7 @@
 import { createHash } from 'node:crypto';
 import { execSync } from 'node:child_process';
 import { expect, test, type Browser, type Page } from '@playwright/test';
-import { BLUE_PNG, RED_JPEG } from '../tests/walkthrough/images';
+import { BLUE_PNG, GREEN_JPEG, RED_JPEG } from '../tests/walkthrough/images';
 
 // Phase 4 (docs/walkthrough/PHASE4_PLAN.md, C6, C10, C12): photos and a customer signature captured with the browser
 // offline survive an offline reload, reach the server byte-identical (by content hash) once it reconnects, and the
@@ -109,4 +109,47 @@ test('photos and a signature captured offline sync after reconnect; the finished
   await expect(page.getByRole('img', { name: 'Photo of the roof, photo 1' })).toBeVisible();
   await expect(page.getByRole('img', { name: 'Signature: Customer signature' })).toBeVisible();
   await context.close();
+});
+
+// Review fix 2026-11-16 (must-fix 1, D-39): two devices add a photo to one item offline, both sync (a conflict), then
+// one adds a third. Every photo is kept and the conflict clears on both — no photo is silently dropped (D-36, WT-03).
+test('a photo added while the photo item is in conflict keeps every competing photo (D-39)', async ({ browser }) => {
+  const a = await device(browser);
+  const b = await device(browser);
+  const { title, id } = await makeInspection(a.page);
+  for (const d of [a, b]) {
+    await d.page.goto('/field?org=acme');
+    await d.page.waitForFunction(() => !!navigator.serviceWorker.controller, null, { timeout: 15_000 });
+    await expect(d.page.getByRole('button', { name: title })).toBeVisible({ timeout: 15_000 });
+    await expect(d.page.getByRole('status')).toHaveText('Synced');
+    await d.context.setOffline(true);
+    await d.page.getByRole('button', { name: title }).click();
+  }
+  await a.page.getByLabel('Add photo: Photo of the roof').setInputFiles({ name: 'a.jpg', mimeType: 'image/jpeg', buffer: Buffer.from(RED_JPEG) });
+  await expect(a.page.getByRole('img', { name: 'Photo of the roof, photo 1' })).toBeVisible();
+  await b.page.getByLabel('Add photo: Photo of the roof').setInputFiles({ name: 'b.png', mimeType: 'image/png', buffer: Buffer.from(BLUE_PNG) });
+  await expect(b.page.getByRole('img', { name: 'Photo of the roof, photo 1' })).toBeVisible();
+  for (const d of [a, b]) {
+    await d.context.setOffline(false);
+    await expect(d.page.getByTestId('pending')).toHaveText('0 changes waiting to sync', { timeout: 20_000 });
+  }
+  await a.page.getByRole('button', { name: 'Sync now' }).click();
+  await expect(b.page.getByRole('group', { name: 'Resolve Photo of the roof' })).toBeVisible();
+
+  await b.page.getByLabel('Add photo: Photo of the roof').setInputFiles({ name: 'c.jpg', mimeType: 'image/jpeg', buffer: Buffer.from(GREEN_JPEG) });
+  await expect(b.page.getByRole('img', { name: 'Photo of the roof, photo 3' })).toBeVisible();
+  await expect(b.page.getByRole('group', { name: 'Resolve Photo of the roof' })).toBeHidden();
+  await expect(b.page.getByTestId('pending')).toHaveText('0 changes waiting to sync', { timeout: 20_000 });
+
+  const server = await (await b.page.request.get(`/o/acme/inspections/${id}/sync`)).json();
+  const sets = server.ops.filter((o: { kind: string; path: string }) => o.kind === 'set' && o.path === 'items.roof-photo');
+  const [first, second, third] = sets.map((o: { value: string[] }) => o.value);
+  expect(new Set(third)).toEqual(new Set([...first, ...second, third.at(-1)]));
+  expect(third).toHaveLength(3);
+  expect(server.conflicts).toEqual([]);
+  await a.page.getByRole('button', { name: 'Sync now' }).click();
+  await expect(a.page.getByRole('img', { name: 'Photo of the roof, photo 3' })).toBeVisible({ timeout: 15_000 });
+  await expect(a.page.getByRole('group', { name: 'Resolve Photo of the roof' })).toBeHidden();
+  await a.context.close();
+  await b.context.close();
 });

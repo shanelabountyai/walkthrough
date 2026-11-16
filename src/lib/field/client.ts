@@ -1,7 +1,7 @@
 // The field app's sync client (Phase 3). The device is a Phase 1 `Replica` whose state lives in IndexedDB; the only
 // server is the Phase 2 endpoint. Nothing here touches the DOM, so it runs in vitest against fake-indexeddb.
 import { appendOp, applyAck, createReplica, localSet, materialize, outboxOps, pinnedTemplate, receive, type Json, type Op, type Replica, type SetOp } from '@/lib/sync';
-import { CHUNK_BYTES, hashOf, isUploadType, MAX_BLOB_BYTES, withoutPhoto, withPhoto } from '@/lib/walkthrough/blobs';
+import { CHUNK_BYTES, hashOf, isUploadType, MAX_BLOB_BYTES, photoBase, withoutPhoto, withPhoto } from '@/lib/walkthrough/blobs';
 import type { TemplateDefinition } from '@/lib/walkthrough/template';
 import { dropUpload, getBlob, getMeta, inTx, listInspections, readInspection, req, setMeta, uploadsFor, type StoredInspection } from './db';
 
@@ -78,7 +78,8 @@ export function answer(db: IDBDatabase, id: string, path: string, value: Json): 
 /**
  * A photo or signature answer (Phase 4). The bytes, their upload entry, the op naming their hash, its outbox entry and
  * the replica's clock and seq are written in **one** transaction: the photo is on the device and queued, or nothing
- * happened (WT-01). `value` builds the new answer from the field's current merged value and the new hash.
+ * happened (WT-01). `value` builds the new answer from the field's current merged value and the new hash; while the
+ * field is in conflict that is the union of every competing value (`photoBase`, D-39), never the displayed one alone.
  */
 function answerWithBlob(db: IDBDatabase, id: string, path: string, blob: { bytes: Uint8Array; type: string }, value: (current: Json, hash: string) => Json): Promise<{ op: SetOp; hash: string }> {
   if (!isUploadType(blob.type)) return Promise.reject(new Error(`cannot store ${blob.type}: JPEG, PNG or WebP only`));
@@ -87,7 +88,7 @@ function answerWithBlob(db: IDBDatabase, id: string, path: string, blob: { bytes
     serial(id, async () => {
       const got = await loadReplica(db, id);
       if (!got) throw new Error('inspection is not on this device');
-      const current = materialize(got.replica.log).fields[path]?.value ?? null;
+      const current = photoBase(materialize(got.replica.log).fields[path]);
       const op = localSet(got.replica, path, value(current, hash));
       await inTx(db, ['ops', 'outbox', 'inspections', 'blobs', 'uploads'], 'readwrite', (t) => {
         t.objectStore('blobs').put({ hash, type: blob.type, size: blob.bytes.length, data: blob.bytes });
@@ -107,12 +108,12 @@ export const attachPhoto = (db: IDBDatabase, id: string, path: string, bytes: Ui
 /** Capture a signature: its answer is the image's hash. A new signature replaces the old one. */
 export const sign = (db: IDBDatabase, id: string, path: string, bytes: Uint8Array, type: string) => answerWithBlob(db, id, path, { bytes, type }, (_, hash) => hash);
 
-/** Remove one photo from a photo item (one op; the earlier answer stays in the log, WT-01). */
+/** Remove one photo from a photo item (one op; the earlier answer stays in the log, WT-01). In a conflict, from the union of the competing lists (D-39). */
 export function removePhoto(db: IDBDatabase, id: string, path: string, hash: string): Promise<SetOp> {
   return serial(id, async () => {
     const got = await loadReplica(db, id);
     if (!got) throw new Error('inspection is not on this device');
-    return answerTx(db, got, path, withoutPhoto(materialize(got.replica.log).fields[path]?.value ?? null, hash));
+    return answerTx(db, got, path, withoutPhoto(photoBase(materialize(got.replica.log).fields[path]), hash));
   });
 }
 

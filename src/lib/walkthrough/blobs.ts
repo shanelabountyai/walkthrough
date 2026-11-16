@@ -1,7 +1,7 @@
 // Photo, signature and report blobs (Phase 4, docs/walkthrough/PHASE4_PLAN.md). Pure: no I/O, so the device and the
 // server share these rules. A blob is named by its content hash, `sha256:<64 hex>` (D-18), which is also what an
 // answer to a photo or signature item holds.
-import type { Json } from '@/lib/sync';
+import type { FieldState, Json } from '@/lib/sync';
 
 export const HASH_RE = /^sha256:[0-9a-f]{64}$/;
 export const isHash = (s: unknown): s is string => typeof s === 'string' && HASH_RE.test(s);
@@ -52,4 +52,18 @@ export function withPhoto(current: Json, hash: string): Json {
 export function withoutPhoto(current: Json, hash: string): Json {
   const list = refsIn(current).filter((h) => h !== hash);
   return list.length ? list : null;
+}
+
+/**
+ * The photo list a device builds its next answer from (D-39). Normally the displayed value. While the item is in
+ * conflict (D-36: two devices added photos concurrently), every competing value counts: the union of all head lists,
+ * oldest head first, each list in its own order, without duplicates. A new add or remove then supersedes every head
+ * (the op's `prev`) without silently dropping a photo another device took (WT-03).
+ */
+export function photoBase(field: Pick<FieldState, 'value' | 'heads' | 'conflict'> | undefined): Json {
+  if (!field) return null;
+  if (!field.conflict || field.heads.length < 2) return field.value;
+  const out: string[] = [];
+  for (const h of field.heads) for (const r of refsIn(h.value)) if (!out.includes(r)) out.push(r);
+  return out.length ? out : null;
 }

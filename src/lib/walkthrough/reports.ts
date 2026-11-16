@@ -28,7 +28,7 @@ export async function reportView(tx: Tx, ctx: OrgCtx, inspectionId: string) {
   if (!insp) return null;
   const rendered: RenderedInspection = renderInspection(definitionSchema.parse(insp.pinnedVersion.definition), insp.templateVersion, await inspectionState(tx, ctx, insp.id));
   const refs = reportRefs(rendered);
-  const complete = await completeBlobs(tx, ctx, refs);
+  const complete = await completeBlobs(tx, ctx, insp.id, refs);
   const latest: ReportRow | null = insp.reports[0] ?? null;
   return { insp, rendered, refs, complete, notReady: readiness(rendered, complete), latest, reports: insp.reports as ReportRow[], truckroll: truckrollLink(ctx.slug, insp.createdAt) };
 }

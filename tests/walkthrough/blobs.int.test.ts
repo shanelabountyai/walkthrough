@@ -6,10 +6,12 @@ import { dbSystem as db } from '@/core/db/system';
 import { localSet } from '@/lib/sync';
 import { diskStore, setBlobStore, type BlobStore } from '@/lib/walkthrough/blob-store';
 import { hashOf } from '@/lib/walkthrough/blobs';
+import { generateReport } from '@/lib/walkthrough/reports';
+import { uploadChunk } from '@/lib/walkthrough/uploads';
 import { createInspectionRecord } from '@/lib/walkthrough/store';
 import { GET, POST } from '@/app/o/[org]/inspections/[id]/blobs/[hash]/route';
 import { beforeOrgDelete } from '@/app/org-hooks';
-import { BLUE_PNG, RED_JPEG } from './images';
+import { BLUE_PNG, GREEN_JPEG, RED_JPEG } from './images';
 import { APP, device, sync, world } from './helpers';
 
 // C2–C4, C11 (docs/walkthrough/PHASE4_PLAN.md): chunked, resumable, content-hashed uploads through an inspection.
@@ -114,7 +116,9 @@ describe('chunked, resumable upload (C2)', () => {
 });
 
 describe('dedupe (C3)', () => {
-  it('the same bytes on a second inspection are already complete: nothing is re-sent, and both read them', async () => {
+  // Review fix 2026-11-16 (must-fix 2, D-40): the bytes are stored once per org, but a second inspection reaches them
+  // only after its device has sent the same bytes through it (the server checks them against the stored blob).
+  it('the same bytes on a second inspection are stored once, but that inspection must send them before it can read them', async () => {
     const w = await answered();
     await upload(w.slug, w.inspectionId, w.hash, RED_JPEG);
     const mctx = await w.as(w.manager.id);
@@ -123,10 +127,81 @@ describe('dedupe (C3)', () => {
     const d2 = await device(w.slug, second);
     localSet(d2, 'items.roof-photo', [w.hash]);
     await sync(w.slug, d2);
-    expect((await status(w.slug, second, w.hash)).body).toEqual({ state: 'complete', received: RED_JPEG.length, size: RED_JPEG.length });
-    expect((await chunk(w.slug, second, w.hash, RED_JPEG.slice(0, 10), 0, RED_JPEG.length)).body.state).toBe('complete'); // takes nothing more
-    expect((await download(w.slug, second, w.hash)).status).toBe(200);
-    expect(await db.storedBlob.count({ where: { orgId: w.org.id } })).toBe(1);
+    expect((await status(w.slug, second, w.hash)).body).toEqual({ state: 'missing', received: 0, size: null });
+    expect((await download(w.slug, second, w.hash)).status).toBe(404); // named in the log is not enough
+    expect((await chunk(w.slug, second, w.hash, RED_JPEG.slice(0, 10), 0, RED_JPEG.length)).body).toEqual({ state: 'partial', received: 10, size: RED_JPEG.length });
+    expect((await download(w.slug, second, w.hash)).status).toBe(404); // ten bytes prove nothing
+    expect((await upload(w.slug, second, w.hash, RED_JPEG, 256, 10)).body).toEqual({ state: 'complete', received: RED_JPEG.length, size: RED_JPEG.length });
+    const got = await download(w.slug, second, w.hash);
+    expect(got.status).toBe(200);
+    expect(Buffer.from(got.bytes).equals(Buffer.from(RED_JPEG))).toBe(true);
+    expect(await db.storedBlob.count({ where: { orgId: w.org.id } })).toBe(1); // still stored once
+    expect(await db.inspectionBlob.count({ where: { orgId: w.org.id, blobHash: w.hash } })).toBe(2);
+    expect((await chunk(w.slug, second, w.hash, RED_JPEG.slice(0, 10), 0, RED_JPEG.length)).body.state).toBe('complete'); // linked now: takes nothing more
+  });
+
+  it('bytes that differ from the stored blob do not link it, and the attempt starts over', async () => {
+    const w = await answered();
+    await upload(w.slug, w.inspectionId, w.hash, RED_JPEG);
+    const mctx = await w.as(w.manager.id);
+    const { id: second } = await createInspectionRecord(mctx, { templateId: w.template.id, assigneeId: w.techA.id, title: 'Jones house' });
+    await w.as(w.techA.id);
+    const d2 = await device(w.slug, second);
+    localSet(d2, 'items.roof-photo', [w.hash]);
+    await sync(w.slug, d2);
+    const forged = RED_JPEG.slice();
+    forged[forged.length - 3] = forged[forged.length - 3]! ^ 0xff;
+    expect(await upload(w.slug, second, w.hash, forged)).toMatchObject({ status: 422, body: { error: 'hash-mismatch', received: 0 } });
+    expect((await status(w.slug, second, w.hash)).body).toMatchObject({ state: 'missing', received: 0 });
+    expect((await download(w.slug, second, w.hash)).status).toBe(404);
+    expect((await download(w.slug, w.inspectionId, w.hash)).status).toBe(200); // the stored blob is untouched
+  });
+});
+
+// Review fix 2026-11-16 (must-fix 2, D-40): naming a hash in an answer gives no access to bytes uploaded through
+// another inspection — not to read them, and not to attach them to a report.
+describe('a hash alone reaches nothing (D-40)', () => {
+  async function twoInspections() {
+    const w = await answered();
+    await upload(w.slug, w.inspectionId, w.hash, RED_JPEG); // tech A's photo on the Smith house
+    const mctx = await w.as(w.manager.id);
+    const { id: other } = await createInspectionRecord(mctx, { templateId: w.template.id, assigneeId: w.techB.id, title: 'Doe house' });
+    await w.as(w.techB.id);
+    const d = await device(w.slug, other);
+    return { ...w, other, dB: d };
+  }
+
+  it('tech B names tech A’s photo hash on their own inspection: status, read and upload give B nothing without the bytes', async () => {
+    const w = await twoInspections();
+    localSet(w.dB, 'items.roof-photo', [w.hash]);
+    expect((await sync(w.slug, w.dB)).status).toBe(200); // held: stored, but inert until bytes arrive through this inspection
+    expect((await status(w.slug, w.other, w.hash)).body).toMatchObject({ state: 'missing', received: 0 });
+    expect((await download(w.slug, w.other, w.hash)).status).toBe(404);
+    expect((await chunk(w.slug, w.other, w.hash, RED_JPEG.slice(0, 10), 0, RED_JPEG.length)).body).toMatchObject({ state: 'partial' });
+    expect((await download(w.slug, w.other, w.hash)).status).toBe(404);
+    expect(await db.inspectionBlob.count({ where: { inspectionId: w.other } })).toBe(1);
+    expect((await db.inspectionBlob.findFirstOrThrow({ where: { inspectionId: w.other } })).linked).toBe(false);
+  });
+
+  it('tech B cannot attach tech A’s customer signature to B’s report', async () => {
+    const w = await twoInspections();
+    const sig = await hashOf(BLUE_PNG);
+    const ctxA = await w.as(w.techA.id);
+    const dA = await device(w.slug, w.inspectionId);
+    localSet(dA, 'items.customer-signature', sig);
+    await sync(w.slug, dA);
+    await uploadChunk(ctxA, w.inspectionId, sig, { offset: 0, length: BLUE_PNG.length, type: 'image/png', bytes: BLUE_PNG });
+    const ctxB = await w.as(w.techB.id);
+    const photoB = await hashOf(GREEN_JPEG);
+    localSet(w.dB, 'items.roof-condition', 'pass');
+    localSet(w.dB, 'items.roof-photo', [photoB]);
+    localSet(w.dB, 'items.supply-temp', 61);
+    localSet(w.dB, 'items.customer-signature', sig); // A's customer's signature
+    expect((await sync(w.slug, w.dB)).status).toBe(200);
+    await uploadChunk(ctxB, w.other, photoB, { offset: 0, length: GREEN_JPEG.length, type: 'image/jpeg', bytes: GREEN_JPEG });
+    const r = await generateReport(ctxB, w.other);
+    expect(r).toEqual({ ok: false, notReady: [{ path: 'items.customer-signature', label: 'Customer signature', why: 'uploading' }] });
+    expect(await db.inspectionReport.count({ where: { inspectionId: w.other } })).toBe(0);
   });
 });
 

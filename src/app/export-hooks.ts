@@ -38,6 +38,12 @@ export const exportTables: readonly ExportTable[] = [
     rows: (tx, orgId) =>
       tx.storedBlob.findMany({ where: { orgId }, orderBy: { hash: 'asc' }, select: { hash: true, size: true, contentType: true, received: true, complete: true, createdById: true, createdAt: true, completedAt: true } }),
   },
+  // D-40: which inspection may reach which blob.
+  {
+    name: 'InspectionBlob',
+    rows: (tx, orgId) =>
+      tx.inspectionBlob.findMany({ where: { orgId }, orderBy: [{ inspectionId: 'asc' }, { blobHash: 'asc' }], select: { inspectionId: true, blobHash: true, received: true, linked: true, linkedAt: true, createdById: true, createdAt: true } }),
+  },
   {
     name: 'InspectionReport',
     rows: (tx, orgId) =>

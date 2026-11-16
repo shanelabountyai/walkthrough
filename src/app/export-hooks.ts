@@ -18,7 +18,7 @@ export const exportTables: readonly ExportTable[] = [
     rows: (tx, orgId) =>
       tx.inspection.findMany({
         where: { orgId },
-        select: { id: true, templateId: true, templateVersion: true, title: true, assigneeId: true, createdById: true, conflictPaths: true, createdAt: true, updatedAt: true },
+        select: { id: true, templateId: true, templateVersion: true, title: true, assigneeId: true, createdById: true, conflictPaths: true, completedAt: true, completedById: true, createdAt: true, updatedAt: true },
       }),
   },
   {
@@ -31,6 +31,18 @@ export const exportTables: readonly ExportTable[] = [
       }),
   },
   { name: 'SyncDevice', rows: (tx, orgId) => tx.syncDevice.findMany({ where: { orgId }, select: { id: true, userId: true, createdAt: true } }) },
+  // Phase 4: blob metadata and report rows. The bytes (photos, signatures, PDFs) stay in the blob store; the export
+  // names each by hash, and the app serves them through the inspection (D-35).
+  {
+    name: 'StoredBlob',
+    rows: (tx, orgId) =>
+      tx.storedBlob.findMany({ where: { orgId }, orderBy: { hash: 'asc' }, select: { hash: true, size: true, contentType: true, received: true, complete: true, createdById: true, createdAt: true, completedAt: true } }),
+  },
+  {
+    name: 'InspectionReport',
+    rows: (tx, orgId) =>
+      tx.inspectionReport.findMany({ where: { orgId }, orderBy: [{ inspectionId: 'asc' }, { number: 'asc' }], select: { id: true, inspectionId: true, number: true, hash: true, size: true, opSeq: true, createdById: true, createdAt: true } }),
+  },
 ];
 
 // An org-owned table left out on purpose, with the reason. INV-34 fails on any model with an orgId column that is in

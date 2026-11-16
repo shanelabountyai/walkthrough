@@ -1,11 +1,18 @@
 import { revokeKeysCreatedBy } from '@/modules/apikeys/keys'; // apikeys
 import type { ListedOrg } from '@/core/tenancy/listed';
 import type { MembershipEnded } from '@/core/tenancy/orgs';
+import { blobStore, BlobStoreUnavailable } from '@/lib/walkthrough/blob-store';
 
 // Clone-owned, like cron-jobs.ts: what must happen before an org is deleted. Throwing stops the
 // deletion. Removing the billing module deletes the lines marked `// billing`.
 // FR-05: a deleted org must not keep charging.
+// Walkthrough (Phase 4, D-34): the org's photo, signature and report bytes go with it (their rows cascade).
 export async function beforeOrgDelete(orgId: string): Promise<void> {
+  try {
+    await blobStore().removeOrg(orgId);
+  } catch (e) {
+    if (!(e instanceof BlobStoreUnavailable)) throw e; // no store configured: no bytes were ever stored
+  }
 }
 
 // Clone-owned (v1.4.0): which of a user's orgs the template's org lists show — `/onboarding`, where every

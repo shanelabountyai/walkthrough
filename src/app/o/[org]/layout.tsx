@@ -11,7 +11,7 @@ export default async function OrgLayout({ children, params }: { children: React.
   return (
     <>
       <nav>
-        <strong>{org.name}</strong> · <Link href={base}>Home</Link> · <Link href={`${base}/inspections`}>Inspections</Link>{can(ctx.role, 'org.update') && <> · <Link href={`${base}/templates`}>Templates</Link></>} · <Link href={`${base}/projects`}>Projects</Link> · <Link href={`${base}/settings/members`}>Members</Link>
+        <strong>{org.name}</strong> · <Link href={base}>Home</Link> · <Link href={`${base}/inspections`}>Inspections</Link> · <a href={`/field?org=${encodeURIComponent(ctx.slug)}`}>Field app</a>{can(ctx.role, 'org.update') && <> · <Link href={`${base}/templates`}>Templates</Link></>} · <Link href={`${base}/projects`}>Projects</Link> · <Link href={`${base}/settings/members`}>Members</Link>
         {can(ctx.role, 'audit.read') && <> · <Link href={`${base}/settings/audit`}>Audit log</Link> · <Link href={`${base}/settings/security`}>Security</Link></>}
         {ctx.role === 'owner' && <> · <Link href={`${base}/settings/sso`}>SSO</Link></>} {/* sso */}
         {can(ctx.role, 'apikeys.manage') && <> · <Link href={`${base}/settings/apikeys`}>API keys</Link></>} {/* apikeys */}

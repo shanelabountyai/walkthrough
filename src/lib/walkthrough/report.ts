@@ -4,6 +4,7 @@ import { PDFDocument, rgb, StandardFonts, type PDFFont, type PDFImage, type PDFP
 import type { Json } from '@/lib/sync';
 import { refsIn } from './blobs';
 import type { RenderedInspection, RenderedItem } from './render';
+import { bindingOf, type Binding } from './signing';
 
 export { readiness, reportRefs, WHY, type NotReady } from './readiness';
 
@@ -23,7 +24,7 @@ export interface ReportInput {
 
 const PFN: Record<string, string> = { pass: 'Pass', fail: 'Fail', na: 'N/A' };
 
-function answerText(i: RenderedItem): string {
+function answerText(i: RenderedItem, binding?: Binding): string {
   const v = i.value;
   if (v === null) return '—';
   switch (i.item.type) {
@@ -38,6 +39,9 @@ function answerText(i: RenderedItem): string {
       return `${n} photo${n === 1 ? '' : 's'}`;
     }
     case 'signature':
+      // D-41: "Signed" only when the signature covers the answers this report prints.
+      if (binding?.status === 'changed') return `ANSWERS CHANGED AFTER SIGNING: this signature is not valid for the answers in this report. The customer signed over an earlier version of the answers (${binding.ops} recorded then); get a new signature.`;
+      if (binding?.status === 'unbound') return 'Signed, but this signature does not record which answers it covered (captured before signatures were bound to answers).';
       return 'Signed';
   }
 }
@@ -143,6 +147,10 @@ export async function buildPdf(input: ReportInput): Promise<Uint8Array> {
     if (rowH) y -= rowH + 8;
   };
 
+  const bindings = new Map<string, Binding>();
+  for (const s of input.rendered.sections) for (const i of s.items) if (i.item.type === 'signature' && i.value !== null) bindings.set(i.path, await bindingOf(i.value, input.rendered));
+  const stale = [...input.rendered.sections.flatMap((s) => s.items)].filter((i) => bindings.get(i.path)?.status === 'changed');
+
   newPage();
   text(input.title, { font: bold, size: 20 });
   y -= 4;
@@ -152,13 +160,17 @@ export async function buildPdf(input: ReportInput): Promise<Uint8Array> {
   text(`Completed by ${input.completedBy} on ${input.generatedAt.toISOString().replace('T', ' ').slice(0, 16)} UTC`);
   text(`Inspection ${input.inspectionId} · built from the op log through seq ${input.opSeq}`, { size: 9, color: [0.35, 0.35, 0.35] });
   text(`Dispatch day in Truckroll: ${input.truckroll}`, { size: 9, color: [0.35, 0.35, 0.35] });
+  if (stale.length) {
+    y -= 6;
+    text(`ANSWERS CHANGED AFTER SIGNING: ${stale.map((i) => i.item.label).join(', ')} no longer cover${stale.length === 1 ? 's' : ''} the answers below (D-41).`, { font: bold, color: [0.75, 0, 0] });
+  }
   for (const s of input.rendered.sections) {
     y -= 10;
     text(s.title, { font: bold, size: 15 });
     for (const i of s.items) {
       y -= 2;
       text(`${i.item.label}${i.item.required ? ' *' : ''}`, { font: bold });
-      text(answerText(i), { indent: 12 });
+      text(answerText(i, bindings.get(i.path)), { indent: 12, ...(bindings.get(i.path)?.status === 'changed' ? { font: bold, color: [0.75, 0, 0] as [number, number, number] } : {}) });
       if (i.item.type === 'photo') await images(refsIn(i.value), 240, 180);
       if (i.item.type === 'signature' && i.value !== null) await images(refsIn(i.value), 240, 100);
     }

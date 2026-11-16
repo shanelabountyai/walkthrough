@@ -5,6 +5,7 @@ import { createInspection, createReplica, localSet, materialize, receive, SERVER
 import { hashOf } from '@/lib/walkthrough/blobs';
 import { renderInspection } from '@/lib/walkthrough/render';
 import { buildPdf, readiness, reportRefs } from '@/lib/walkthrough/report';
+import { bindSignature } from '@/lib/walkthrough/signing';
 import { EXAMPLE_DEFINITION } from '@/lib/walkthrough/template';
 import { BLUE_PNG, GREEN_JPEG, RED_JPEG } from './images';
 
@@ -92,5 +93,35 @@ describe('the PDF (C8)', () => {
     const pdf = await buildPdf({ number: 1, title: 'T', templateName: 'House', inspectionId: ID, technician: 't', completedBy: 'c', generatedAt: new Date(0), opSeq: 1, truckroll: 'x', rendered: r, blobs: new Map([[p1, { bytes: new Uint8Array([1, 2, 3]), contentType: 'image/jpeg' }], [p2, { bytes: GREEN_JPEG, contentType: 'image/webp' }], [sig, { bytes: BLUE_PNG, contentType: 'image/png' }]]) });
     expect(Buffer.from(pdf).toString('latin1').match(/\/Subtype \/Image/g)).toHaveLength(1);
     expect(contents(pdf)).toContain(hex('(image ').slice(0, -1));
+  });
+});
+
+// Review fix 2026-11-16 (should-fix 3, D-41): the report says whether the signature covers the answers it prints.
+describe('the signature in the PDF (D-41)', () => {
+  async function pdfFor(changeAfterSigning: boolean) {
+    const [p1, sig] = await Promise.all([RED_JPEG, BLUE_PNG].map(hashOf));
+    const server = createReplica(SERVER_ID, ID);
+    const a = createReplica('dev-a', ID);
+    receive(a, [createInspection(server, 't1', 1)]);
+    localSet(a, 'items.roof-condition', 'pass');
+    localSet(a, 'items.roof-photo', [p1!]);
+    localSet(a, 'items.supply-temp', 61);
+    localSet(a, 'items.customer-signature', await bindSignature(EXAMPLE_DEFINITION, 1, a.log, sig!));
+    if (changeAfterSigning) localSet(a, 'items.roof-condition', 'fail');
+    const r = renderInspection(EXAMPLE_DEFINITION, 1, materialize(a.log));
+    const blobs = new Map([[p1!, { bytes: RED_JPEG, contentType: 'image/jpeg' }], [sig!, { bytes: BLUE_PNG, contentType: 'image/png' }]]);
+    return contents(await buildPdf({ number: 1, title: 'T', templateName: 'House', inspectionId: ID, technician: 't', completedBy: 'c', generatedAt: new Date(0), opSeq: 9, truckroll: 'x', rendered: r, blobs }));
+  }
+
+  it('answers unchanged since signing: "Signed"', async () => {
+    const text = await pdfFor(false);
+    expect(text).toContain(hex('Signed'));
+    expect(text).not.toContain(hex('ANSWERS CHANGED AFTER SIGNING').slice(0, -1));
+  });
+
+  it('an answer changed after signing: the report says so and never prints a plain "Signed"', async () => {
+    const text = await pdfFor(true);
+    expect(text).toContain(hex('ANSWERS CHANGED AFTER SIGNING').slice(0, -1));
+    expect(text).not.toContain(hex('Signed'));
   });
 });

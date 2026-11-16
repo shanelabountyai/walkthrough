@@ -1,3 +1,4 @@
+import { inflateSync } from 'node:zlib';
 import { mkdtemp } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
@@ -7,6 +8,8 @@ import { dbSystem as db } from '@/core/db/system';
 import { localSet } from '@/lib/sync';
 import { diskStore, setBlobStore } from '@/lib/walkthrough/blob-store';
 import { hashOf } from '@/lib/walkthrough/blobs';
+import { bindSignature } from '@/lib/walkthrough/signing';
+import { EXAMPLE_DEFINITION } from '@/lib/walkthrough/template';
 import { uploadChunk } from '@/lib/walkthrough/uploads';
 import { GET, POST } from '@/app/o/[org]/inspections/[id]/report/route';
 import { BLUE_PNG, RED_JPEG } from './images';
@@ -117,3 +120,47 @@ describe('the report endpoint (C9)', () => {
     expect((await complete(w.slug, w.inspectionId)).status).toBe(200);
   });
 });
+
+// Review fix 2026-11-16 (should-fix 3, D-41): a bound signature through the real endpoints, and an answer changed after
+// completion (still accepted: D-32 makes it report n+1) is called out in that report.
+describe('signature binding end to end (D-41)', () => {
+  it('report 1 is "Signed"; an answer changed after completion is stored and report 2 says the signature no longer covers it', async () => {
+    const w = await world();
+    const ctx = await w.as(w.techA.id);
+    const d = await device(w.slug, w.inspectionId);
+    const [photo, sig] = [await hashOf(RED_JPEG), await hashOf(BLUE_PNG)];
+    localSet(d, 'items.roof-condition', 'pass');
+    localSet(d, 'items.roof-photo', [photo]);
+    localSet(d, 'items.supply-temp', 61);
+    const bound = await bindSignature(EXAMPLE_DEFINITION, 1, d.log, sig);
+    localSet(d, 'items.customer-signature', bound);
+    expect((await sync(w.slug, d)).status).toBe(200);
+    await uploadChunk(ctx, w.inspectionId, photo, { offset: 0, length: RED_JPEG.length, type: 'image/jpeg', bytes: RED_JPEG });
+    expect(await uploadChunk(ctx, w.inspectionId, sig, { offset: 0, length: BLUE_PNG.length, type: 'image/png', bytes: BLUE_PNG })).toMatchObject({ state: 'complete' });
+    expect((await complete(w.slug, w.inspectionId)).body).toMatchObject({ number: 1, created: true });
+    const stored = await db.inspectionOp.findFirstOrThrow({ where: { inspectionId: w.inspectionId, path: 'items.customer-signature' } });
+    expect(stored.value).toEqual(bound); // the binding is in the op log, immutable (WT-01)
+    expect(contents((await pdf(w.slug, w.inspectionId, 1)).bytes)).toContain(hex('Signed'));
+
+    localSet(d, 'items.roof-condition', 'fail'); // after completion
+    expect((await sync(w.slug, d)).status).toBe(200);
+    expect((await complete(w.slug, w.inspectionId)).body).toMatchObject({ number: 2, created: true });
+    const two = contents((await pdf(w.slug, w.inspectionId, 2)).bytes);
+    expect(two).toContain(hex('ANSWERS CHANGED AFTER SIGNING').slice(0, -1));
+    expect(two).not.toContain(hex('Signed'));
+  });
+});
+
+function contents(pdf: Uint8Array): string {
+  const raw = Buffer.from(pdf).toString('latin1');
+  let out = '';
+  for (const m of raw.matchAll(/stream\r?\n([\s\S]*?)\r?\nendstream/g)) {
+    try {
+      out += inflateSync(Buffer.from(m[1]!, 'latin1')).toString('latin1');
+    } catch {
+      /* an image stream */
+    }
+  }
+  return out.toUpperCase();
+}
+const hex = (s: string) => `<${Buffer.from(s, 'latin1').toString('hex').toUpperCase()}>`;

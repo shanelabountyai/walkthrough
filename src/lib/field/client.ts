@@ -2,6 +2,7 @@
 // server is the Phase 2 endpoint. Nothing here touches the DOM, so it runs in vitest against fake-indexeddb.
 import { appendOp, applyAck, createReplica, localSet, materialize, outboxOps, pinnedTemplate, receive, type Json, type Op, type Replica, type SetOp } from '@/lib/sync';
 import { CHUNK_BYTES, hashOf, isUploadType, MAX_BLOB_BYTES, photoBase, withoutPhoto, withPhoto } from '@/lib/walkthrough/blobs';
+import { bindSignature } from '@/lib/walkthrough/signing';
 import type { TemplateDefinition } from '@/lib/walkthrough/template';
 import { dropUpload, getBlob, getMeta, inTx, listInspections, readInspection, req, setMeta, uploadsFor, type StoredInspection } from './db';
 
@@ -81,7 +82,13 @@ export function answer(db: IDBDatabase, id: string, path: string, value: Json): 
  * happened (WT-01). `value` builds the new answer from the field's current merged value and the new hash; while the
  * field is in conflict that is the union of every competing value (`photoBase`, D-39), never the displayed one alone.
  */
-function answerWithBlob(db: IDBDatabase, id: string, path: string, blob: { bytes: Uint8Array; type: string }, value: (current: Json, hash: string) => Json): Promise<{ op: SetOp; hash: string }> {
+function answerWithBlob(
+  db: IDBDatabase,
+  id: string,
+  path: string,
+  blob: { bytes: Uint8Array; type: string },
+  value: (current: Json, hash: string, got: { meta: StoredInspection; replica: Replica }) => Json | Promise<Json>,
+): Promise<{ op: SetOp; hash: string }> {
   if (!isUploadType(blob.type)) return Promise.reject(new Error(`cannot store ${blob.type}: JPEG, PNG or WebP only`));
   if (!blob.bytes.length || blob.bytes.length > MAX_BLOB_BYTES) return Promise.reject(new Error('the image is empty or too large'));
   return hashOf(blob.bytes).then((hash) =>
@@ -89,7 +96,7 @@ function answerWithBlob(db: IDBDatabase, id: string, path: string, blob: { bytes
       const got = await loadReplica(db, id);
       if (!got) throw new Error('inspection is not on this device');
       const current = photoBase(materialize(got.replica.log).fields[path]);
-      const op = localSet(got.replica, path, value(current, hash));
+      const op = localSet(got.replica, path, await value(current, hash, got));
       await inTx(db, ['ops', 'outbox', 'inspections', 'blobs', 'uploads'], 'readwrite', (t) => {
         t.objectStore('blobs').put({ hash, type: blob.type, size: blob.bytes.length, data: blob.bytes });
         t.objectStore('uploads').put({ inspectionId: id, hash, type: blob.type, size: blob.bytes.length });
@@ -105,8 +112,12 @@ function answerWithBlob(db: IDBDatabase, id: string, path: string, blob: { bytes
 /** Add a photo to a photo item: its answer is the list of hashes, in capture order. */
 export const attachPhoto = (db: IDBDatabase, id: string, path: string, bytes: Uint8Array, type: string) => answerWithBlob(db, id, path, { bytes, type }, withPhoto);
 
-/** Capture a signature: its answer is the image's hash. A new signature replaces the old one. */
-export const sign = (db: IDBDatabase, id: string, path: string, bytes: Uint8Array, type: string) => answerWithBlob(db, id, path, { bytes, type }, (_, hash) => hash);
+/**
+ * Capture a signature. Its answer binds the image's hash to what the customer was shown (D-41): a digest of every
+ * non-signature answer on this device and how many answers its log held. A new signature replaces the old one.
+ */
+export const sign = (db: IDBDatabase, id: string, path: string, bytes: Uint8Array, type: string) =>
+  answerWithBlob(db, id, path, { bytes, type }, (_, hash, got) => bindSignature(got.meta.definition, got.meta.templateVersion, got.replica.log, hash));
 
 /** Remove one photo from a photo item (one op; the earlier answer stays in the log, WT-01). In a conflict, from the union of the competing lists (D-39). */
 export function removePhoto(db: IDBDatabase, id: string, path: string, hash: string): Promise<SetOp> {

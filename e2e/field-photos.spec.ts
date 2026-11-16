@@ -88,7 +88,9 @@ test('photos and a signature captured offline sync after reconnect; the finished
   const server = await (await page.request.get(`/o/acme/inspections/${id}/sync`)).json();
   const latest = (path: string) => server.ops.filter((o: { kind: string; path: string }) => o.kind === 'set' && o.path === path).at(-1).value;
   const photos: string[] = latest('items.roof-photo');
-  const signature: string = latest('items.customer-signature');
+  const bound = latest('items.customer-signature'); // D-41: { image, answers, ops }
+  expect(bound).toMatchObject({ image: expect.stringMatching(/^sha256:/), answers: expect.stringMatching(/^sha256:/), ops: 4 });
+  const signature: string = bound.image;
   expect(photos).toHaveLength(2);
   for (const h of [...photos, signature]) {
     const res = await page.request.get(`/o/acme/inspections/${id}/blobs/${h}`);

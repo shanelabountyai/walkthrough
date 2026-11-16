@@ -7,6 +7,8 @@ import { createInspection, createReplica, materialize, serverAccept, SERVER_ID, 
 import { answer, attachPhoto, download, finish, loadReplica, removePhoto, sign, syncAll, syncInspection, uploadBlobs, type Transport } from '@/lib/field/client';
 import { countOutbox, countUploads, getBlob, listInspections, openDb } from '@/lib/field/db';
 import { CHUNK_BYTES, hashOf, refsIn } from '@/lib/walkthrough/blobs';
+import { renderInspection } from '@/lib/walkthrough/render';
+import { answersDigest } from '@/lib/walkthrough/signing';
 import { EXAMPLE_DEFINITION } from '@/lib/walkthrough/template';
 
 const ID = '00000000-0000-4000-8000-000000000029';
@@ -215,7 +217,8 @@ describe('photos and signatures on the device (C5)', () => {
     expect(second.op.value).toEqual([hash, second.hash]); // capture order
     expect(second.op.prev).toEqual([op.opId]);
     const sig = await sign(db, ID, 'items.customer-signature', image(300, 3), 'image/png');
-    expect(sig.op.value).toBe(sig.hash);
+    expect(sig.op.value).toMatchObject({ image: sig.hash }); // D-41: the image hash, bound to the answers signed
+    expect(refsIn(sig.op.value)).toEqual([sig.hash]);
     db.close();
     const again = await openDb(name);
     expect(await countOutbox(again)).toBe(3);
@@ -331,6 +334,24 @@ describe('photos added or removed during a conflict (D-39)', () => {
     // each device saw both heads, so both lists hold pa and pb in the same order, then their own new photo
     expect((x.op.value as string[]).slice(0, 2)).toEqual((y.op.value as string[]).slice(0, 2));
     expect(new Set((x.op.value as string[]).slice(0, 2))).toEqual(new Set([pa.hash, pb.hash]));
+  });
+});
+
+// Review fix 2026-11-16 (should-fix 3, D-41): a signature records what it was signed over.
+describe('a signature is bound to the answers it was captured over (D-41)', () => {
+  it('sign() stores the image hash, a digest of the non-signature answers shown, and the answer count', async () => {
+    const db = await fresh();
+    await download(db, memServer().transport, 'acme', 'u1', ID);
+    await answer(db, ID, 'items.roof-condition', 'pass');
+    await answer(db, ID, 'items.supply-temp', 61);
+    const before = (await loadReplica(db, ID))!.replica.log;
+    const sig = await sign(db, ID, 'items.customer-signature', image(300, 3), 'image/png');
+    const expected = await answersDigest(renderInspection(EXAMPLE_DEFINITION, 1, materialize(before)));
+    expect(sig.op.value).toEqual({ image: sig.hash, answers: expected, ops: 2 });
+    expect(refsIn(sig.op.value)).toEqual([sig.hash]); // still names its image (upload, report)
+    await answer(db, ID, 'items.roof-condition', 'fail');
+    const after = renderInspection(EXAMPLE_DEFINITION, 1, materialize((await loadReplica(db, ID))!.replica.log));
+    expect(await answersDigest(after)).not.toBe(expected);
   });
 });
 

@@ -401,7 +401,7 @@ function Item({
     input = (
       <fieldset>
         <legend>{label}</legend>
-        {typeof i.value === 'string' && refsIn(i.value).length > 0 && <BlobImage ctx={blobs} hash={i.value} alt={`Signature: ${it.label}`} height={80} />}
+        {refsIn(i.value).length > 0 && <BlobImage ctx={blobs} hash={refsIn(i.value)[0]!} alt={`Signature: ${it.label}`} height={80} />}
         <SignaturePad label={it.label} signed={i.value !== null} onSave={onSign} />
       </fieldset>
     );

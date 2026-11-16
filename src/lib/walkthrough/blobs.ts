@@ -17,13 +17,17 @@ export const UPLOAD_TYPES = ['image/jpeg', 'image/png', 'image/webp'] as const;
 export type UploadType = (typeof UPLOAD_TYPES)[number];
 export const isUploadType = (t: unknown): t is UploadType => typeof t === 'string' && (UPLOAD_TYPES as readonly string[]).includes(t);
 
-/** Every blob hash an answer names, in order, without duplicates: a signature is one hash, a photo item a list. */
+/**
+ * Every blob hash an answer names, in order, without duplicates: a signature is one hash (bare, or the `image` of a
+ * bound signature, D-41), a photo item a list.
+ */
 export function refsIn(value: Json): string[] {
   const out: string[] = [];
   const add = (v: Json) => {
     if (isHash(v) && !out.includes(v)) out.push(v);
   };
   if (Array.isArray(value)) value.forEach(add);
+  else if (value && typeof value === 'object' && 'image' in value) add(value.image as Json);
   else add(value);
   return out;
 }

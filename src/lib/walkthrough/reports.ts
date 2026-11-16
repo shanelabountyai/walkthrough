@@ -11,7 +11,7 @@ import { buildPdf, readiness, reportRefs, type NotReady } from './report';
 import { inspectionState, visibleTo } from './store';
 import { definitionSchema } from './template';
 import { truckrollLink } from './truckroll';
-import { completeBlobs } from './uploads';
+import { BlobBytesMissing, completeBlobs } from './uploads';
 
 export type ReportRow = { number: number; hash: string; size: number; opSeq: number; createdAt: Date };
 
@@ -53,10 +53,13 @@ export async function generateReport(ctx: OrgCtx, inspectionId: string, now = ne
 
     const blobs = new Map<string, { bytes: Uint8Array; contentType: string }>();
     const types = new Map((await tx.storedBlob.findMany({ where: { ...inOrg(ctx), hash: { in: v.refs } }, select: { hash: true, contentType: true } })).map((b) => [b.hash, b.contentType]));
+    const lost: string[] = [];
     for (const h of v.refs) {
       const bytes = await store.read(ctx.orgId, h);
       if (bytes) blobs.set(h, { bytes, contentType: types.get(h) ?? 'application/octet-stream' });
+      else lost.push(h); // marked complete, but the store has no bytes: a server fault, never a report without the photo
     }
+    if (lost.length) throw new BlobBytesMissing(lost);
     const emails = new Map(
       (await tx.membership.findMany({ where: { ...inOrg(ctx), userId: { in: [v.insp.assigneeId, ctx.userId] } }, select: { userId: true, user: { select: { email: true } } } })).map((m) => [m.userId, m.user.email]),
     );

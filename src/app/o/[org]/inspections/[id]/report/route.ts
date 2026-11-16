@@ -1,9 +1,11 @@
 import { z } from 'zod';
 import { requireOrg } from '@/core/authz/guards';
 import { isSameOrigin } from '@/core/http';
+import { log } from '@/core/log';
 import { BlobStoreUnavailable } from '@/lib/walkthrough/blob-store';
 import { WHY } from '@/lib/walkthrough/report';
 import { generateReport, readReport } from '@/lib/walkthrough/reports';
+import { BlobBytesMissing } from '@/lib/walkthrough/uploads';
 
 export const dynamic = 'force-dynamic';
 
@@ -51,6 +53,10 @@ export async function POST(req: Request, { params }: Params) {
     return json({ number: r.report.number, created: r.created, opSeq: r.report.opSeq, url: `/o/${ctx.slug}/inspections/${id.data}/report?n=${r.report.number}` });
   } catch (e) {
     if (e instanceof BlobStoreUnavailable) return json({ error: 'storage_unavailable' }, 503);
+    if (e instanceof BlobBytesMissing) {
+      log('report.blob_bytes_missing', { inspectionId: id.data, hashes: e.hashes.join(',') });
+      return json({ error: 'blob_bytes_missing', detail: e.message, hashes: e.hashes }, 500);
+    }
     throw e;
   }
 }

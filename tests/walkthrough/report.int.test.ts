@@ -1,5 +1,5 @@
 import { inflateSync } from 'node:zlib';
-import { mkdtemp } from 'node:fs/promises';
+import { mkdtemp, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { PDFDocument } from 'pdf-lib';
@@ -16,7 +16,11 @@ import { BLUE_PNG, RED_JPEG } from './images';
 import { APP, device, sync, world } from './helpers';
 
 // C9 (docs/walkthrough/PHASE4_PLAN.md): completing an inspection stores and links its PDF report.
-beforeAll(async () => setBlobStore(diskStore(await mkdtemp(path.join(tmpdir(), 'wt-report-int-')))));
+let root = '';
+beforeAll(async () => {
+  root = await mkdtemp(path.join(tmpdir(), 'wt-report-int-'));
+  setBlobStore(diskStore(root));
+});
 
 const params = (org: string, id: string) => ({ params: Promise.resolve({ org, id }) });
 async function complete(slug: string, id: string, headers: Record<string, string> = {}) {
@@ -164,3 +168,18 @@ function contents(pdf: Uint8Array): string {
   return out.toUpperCase();
 }
 const hex = (s: string) => `<${Buffer.from(s, 'latin1').toString('hex').toUpperCase()}>`;
+
+// Review fix 2026-11-16 (should-fix 4): a blob the database marks complete but whose bytes are gone from storage is a
+// server fault — never a report that prints "not a JPEG or PNG" in place of the customer's photo.
+describe('a complete blob with no bytes in storage (should-fix 4)', () => {
+  it('the report is refused with a clear 500, nothing is stored, and the inspection stays open', async () => {
+    const w = await filled();
+    await rm(path.join(root, w.org.id, w.photo.slice(7)));
+    const r = await complete(w.slug, w.inspectionId);
+    expect(r.status).toBe(500);
+    expect(r.body).toMatchObject({ error: 'blob_bytes_missing', hashes: [w.photo] });
+    expect(r.body.detail).toMatch(/blob store has no bytes/);
+    expect(await db.inspectionReport.count({ where: { inspectionId: w.inspectionId } })).toBe(0);
+    expect((await db.inspection.findUniqueOrThrow({ where: { id: w.inspectionId } })).completedAt).toBeNull();
+  });
+});

@@ -18,6 +18,8 @@ object storage behind an interface with a local disk adapter in dev.
 Not in scope: video, image editing/annotation, a production object-storage adapter that needs credentials (owner hand
 step), pruning photo blobs from the device, a re-pin/re-key UI, live LLM calls (none are needed in this phase).
 
+Decisions made while building: D-30..D-38 in `DECISIONS.md`.
+
 ## Pieces
 
 | piece | where | what |
@@ -28,7 +30,7 @@ step), pruning photo blobs from the device, a re-pin/re-key UI, live LLM calls (
 | Blob endpoint | `src/app/o/[org]/inspections/[id]/blobs/[hash]/route.ts` | `GET ?status` → `{state, received}`; `GET` → bytes (complete only, `nosniff`); `POST` (same-origin, `application/octet-stream`, `x-upload-offset`, `x-upload-length`, `x-blob-type`) → append one chunk. Only for an inspection the user can see (WT-05) and a hash a `set` op in **that** inspection's log names (so ops sync first and nothing unreferenced is stored) |
 | Device blobs | `src/lib/field/db.ts` v2, `src/lib/field/client.ts` | New stores `blobs` (hash → bytes, type) and `uploads` ([inspectionId, hash] → pending). `attachPhoto` / `removePhoto` / `sign`: blob + upload entry + op + outbox + clock/seq in **one** transaction. `syncInspection` pushes ops, then uploads each pending blob in 256 KB chunks from the server's `received` (resumable), dropping the upload entry only when the server says complete |
 | Field UI | `src/app/field/field-app.tsx` | Photo items: camera/file input, downscale to ≤1600 px JPEG on the device, thumbnails from IndexedDB, remove. Signature items: a pointer-drawn canvas, Save/Clear, the saved image. "N photos waiting to upload". Finish: local readiness + "Finish and make report" (online), then "Open report" |
-| Report | `InspectionReport` model, `src/lib/walkthrough/report.ts` | `readiness(rendered, blobStates)` (pure): no conflicts, required items answered, answers valid, every referenced blob uploaded. `buildPdf(…)` with `pdf-lib`: header, every section and answer, photos and signature embedded, footer with report number and op cursor. Stored in the blob store (content-hashed) with an append-only `InspectionReport` row; the inspection is marked completed |
+| Report | `InspectionReport` model, `src/lib/walkthrough/readiness.ts`, `report.ts` | `readiness(rendered, blobStates)` (pure, dependency-free, also used by the field app): no conflicts, required items answered, answers valid, every referenced blob uploaded. `buildPdf(…)` with `pdf-lib`: header, every section and answer, photos and signature embedded, footer with report number and op cursor. Stored in the blob store (content-hashed) with an append-only `InspectionReport` row; the inspection is marked completed |
 | Report endpoint | `src/app/o/[org]/inspections/[id]/report/route.ts` | `POST` (same-origin JSON) → generate (409 with reasons when not ready; returns the latest report unchanged when nothing changed since it); `GET [?n=]` → the PDF. Assignee or manager (WT-05) |
 | Truckroll link | `src/lib/walkthrough/truckroll.ts` (pure) | `truckrollLink(slug, at)` → `${TRUCKROLL_URL}/o/<slug>/dispatch?date=<Chicago day of the inspection>`. On the inspection page, in the field app (sent in the download header) and in the PDF |
 | Org page | `src/app/o/[org]/inspections/[id]/page.tsx` | Photos and signature shown, readiness, "Complete and generate report", the reports list, the Truckroll link |

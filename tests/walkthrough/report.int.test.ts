@@ -144,14 +144,15 @@ describe('signature binding end to end (D-41)', () => {
     expect((await complete(w.slug, w.inspectionId)).body).toMatchObject({ number: 1, created: true });
     const stored = await db.inspectionOp.findFirstOrThrow({ where: { inspectionId: w.inspectionId, path: 'items.customer-signature' } });
     expect(stored.value).toEqual(bound); // the binding is in the op log, immutable (WT-01)
-    expect(contents((await pdf(w.slug, w.inspectionId, 1)).bytes)).toContain(hex('Signed'));
+    const one = contents((await pdf(w.slug, w.inspectionId, 1)).bytes);
+    expect(one, 'report 1 prints a plain "Signed"').toContain(hex('Signed'));
 
     localSet(d, 'items.roof-condition', 'fail'); // after completion
     expect((await sync(w.slug, d)).status).toBe(200);
     expect((await complete(w.slug, w.inspectionId)).body).toMatchObject({ number: 2, created: true });
     const two = contents((await pdf(w.slug, w.inspectionId, 2)).bytes);
-    expect(two).toContain(hex('ANSWERS CHANGED AFTER SIGNING').slice(0, -1));
-    expect(two).not.toContain(hex('Signed'));
+    expect(two, 'report 2 calls out the change').toContain(hex('ANSWERS CHANGED AFTER SIGNING').slice(0, -1));
+    expect(two, 'report 2 has no plain "Signed"').not.toContain(hex('Signed'));
   });
 });
 

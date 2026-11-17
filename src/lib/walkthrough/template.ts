@@ -78,7 +78,13 @@ export function validAnswer(item: TemplateItem, value: Json): boolean {
     case 'photo':
       return Array.isArray(value) && value.length > 0 && value.every((v) => typeof v === 'string' && HASH.test(v));
     case 'signature':
-      return typeof value === 'string' && HASH.test(value);
+      // A bare image hash (captured before D-41), or `{ image, answers, ops }`: the image bound to the answers signed (signing.ts).
+      if (typeof value === 'string') return HASH.test(value);
+      return (
+        !!value && typeof value === 'object' && !Array.isArray(value) && Object.keys(value).sort().join() === 'answers,image,ops' &&
+        typeof value.image === 'string' && HASH.test(value.image) && typeof value.answers === 'string' && HASH.test(value.answers) &&
+        Number.isInteger(value.ops) && (value.ops as number) >= 0
+      );
   }
 }
 

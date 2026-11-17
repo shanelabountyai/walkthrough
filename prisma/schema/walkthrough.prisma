@@ -50,9 +50,13 @@ model Inspection {
   clock             Int               @default(0) // the server replica's Lamport clock
   opSeq             Int               @default(0) // last InspectionOp.seq handed out
   conflictPaths     String[]          @default([]) // cached materialize().conflicts, for list badges
+  completedAt       DateTime?         @db.Timestamptz(6) // Phase 4: set when the first report is generated
+  completedById     String?           @db.Uuid
   createdAt         DateTime          @default(now()) @db.Timestamptz(6)
   updatedAt         DateTime          @updatedAt @db.Timestamptz(6)
   ops               InspectionOp[]
+  reports           InspectionReport[]
+  blobs             InspectionBlob[]
 
   @@index([orgId, assigneeId])
 }
@@ -91,4 +95,59 @@ model SyncDevice {
   createdAt DateTime @default(now()) @db.Timestamptz(6)
 
   @@id([orgId, id])
+}
+
+/// Phase 4: one content-addressed blob (a photo, a signature, a report PDF) per org. The bytes live in the blob store
+/// (src/lib/walkthrough/blob-store.ts, D-30); this row tracks the resumable upload. Dedupe: a complete row is never re-sent.
+model StoredBlob {
+  orgId       String    @db.Uuid
+  org         Org       @relation(fields: [orgId], references: [id], onDelete: Cascade)
+  hash        String // sha256:<64 hex>
+  size        Int
+  contentType String
+  received    Int       @default(0)
+  complete    Boolean   @default(false)
+  createdById String?   @db.Uuid // null: written by the server (a report)
+  createdAt   DateTime  @default(now()) @db.Timestamptz(6)
+  completedAt DateTime? @db.Timestamptz(6)
+
+  @@id([orgId, hash])
+}
+
+/// Phase 4: a generated PDF report. Append-only (trigger "InspectionReport_append_only"): a later change is report n+1.
+model InspectionReport {
+  id           String     @id @default(uuid()) @db.Uuid
+  orgId        String     @db.Uuid
+  org          Org        @relation(fields: [orgId], references: [id], onDelete: Cascade)
+  inspectionId String     @db.Uuid
+  inspection   Inspection @relation(fields: [inspectionId], references: [id], onDelete: Cascade)
+  number       Int
+  hash         String // the PDF's StoredBlob
+  size         Int
+  opSeq        Int // the inspection's op cursor the report was built from
+  createdById  String     @db.Uuid
+  createdAt    DateTime   @default(now()) @db.Timestamptz(6)
+
+  @@unique([inspectionId, number])
+  @@index([orgId])
+}
+
+/// Review fix 2026-11-16 (D-40): which blobs an inspection may read and attach. A StoredBlob is shared per org (dedupe),
+/// but an inspection reaches it only once bytes uploaded through that inspection have matched it: `linked` is set when
+/// this inspection's upload completes the blob, or — for a blob the org already holds — when the same bytes, sent
+/// again through this inspection, have matched the stored ones. `received` is this inspection's own upload progress.
+model InspectionBlob {
+  orgId        String     @db.Uuid
+  org          Org        @relation(fields: [orgId], references: [id], onDelete: Cascade)
+  inspectionId String     @db.Uuid
+  inspection   Inspection @relation(fields: [inspectionId], references: [id], onDelete: Cascade)
+  blobHash     String // sha256:<64 hex>, the StoredBlob's hash
+  received     Int        @default(0)
+  linked       Boolean    @default(false)
+  linkedAt     DateTime?  @db.Timestamptz(6)
+  createdById  String?    @db.Uuid
+  createdAt    DateTime   @default(now()) @db.Timestamptz(6)
+
+  @@id([inspectionId, blobHash])
+  @@index([orgId, blobHash])
 }

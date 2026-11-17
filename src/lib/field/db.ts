@@ -4,11 +4,13 @@
 //   ops          keyPath [inspectionId, opId]    — the device's copy of the op log (never pruned)
 //   outbox       keyPath [inspectionId, opId]    — ops not yet acknowledged by the server
 //   meta         keyPath key                     — device ids, last org, last sync
+//   blobs        keyPath hash                    — photo and signature bytes, by content hash (v2, Phase 4)
+//   uploads      keyPath [inspectionId, hash]    — blobs the server does not hold all of yet (v2, Phase 4)
 import type { Op } from '@/lib/sync';
 import type { TemplateDefinition } from '@/lib/walkthrough/template';
 
 export const DB_NAME = 'walkthrough';
-const VERSION = 1;
+const VERSION = 2;
 
 export interface StoredInspection {
   id: string;
@@ -24,21 +26,44 @@ export interface StoredInspection {
   deviceId: string;
   /** The server answered 404 (unassigned or deleted): kept while it holds unsent ops, hidden otherwise. */
   gone?: boolean;
+  /** The Truckroll day board for this inspection (Phase 4), from the download header. */
+  truckroll?: string;
 }
 export interface OutboxEntry {
   inspectionId: string;
   opId: string;
 }
+/** A photo or signature on this device. The bytes are kept after upload, so the app can show them offline. */
+export interface StoredBlobRecord {
+  hash: string;
+  type: string;
+  size: number;
+  data: Uint8Array;
+}
+/** A blob of this inspection that still has to reach the server. Removed only once the server holds all of it. */
+export interface UploadEntry {
+  inspectionId: string;
+  hash: string;
+  type: string;
+  size: number;
+}
 
-export function openDb(name = DB_NAME, factory: IDBFactory = indexedDB): Promise<IDBDatabase> {
+export function openDb(name = DB_NAME, factory: IDBFactory = indexedDB, version = VERSION): Promise<IDBDatabase> {
   return new Promise((resolve, reject) => {
-    const r = factory.open(name, VERSION);
-    r.onupgradeneeded = () => {
+    const r = factory.open(name, version);
+    r.onupgradeneeded = (e) => {
       const db = r.result;
-      db.createObjectStore('inspections', { keyPath: 'id' });
-      db.createObjectStore('ops', { keyPath: ['inspectionId', 'opId'] }).createIndex('byInspection', 'inspectionId');
-      db.createObjectStore('outbox', { keyPath: ['inspectionId', 'opId'] }).createIndex('byInspection', 'inspectionId');
-      db.createObjectStore('meta', { keyPath: 'key' });
+      // Each version only adds stores, so a device's existing inspections, ops and outbox carry over untouched.
+      if (e.oldVersion < 1) {
+        db.createObjectStore('inspections', { keyPath: 'id' });
+        db.createObjectStore('ops', { keyPath: ['inspectionId', 'opId'] }).createIndex('byInspection', 'inspectionId');
+        db.createObjectStore('outbox', { keyPath: ['inspectionId', 'opId'] }).createIndex('byInspection', 'inspectionId');
+        db.createObjectStore('meta', { keyPath: 'key' });
+      }
+      if (e.oldVersion < 2 && (e.newVersion ?? version) >= 2) {
+        db.createObjectStore('blobs', { keyPath: 'hash' });
+        db.createObjectStore('uploads', { keyPath: ['inspectionId', 'hash'] }).createIndex('byInspection', 'inspectionId');
+      }
     };
     r.onsuccess = () => resolve(r.result);
     r.onerror = () => reject(r.error);
@@ -97,3 +122,14 @@ export const getMeta = <T>(db: IDBDatabase, key: string) =>
 
 export const setMeta = (db: IDBDatabase, key: string, value: unknown) =>
   inTx(db, ['meta'], 'readwrite', (t) => void t.objectStore('meta').put({ key, value }));
+
+export const countUploads = (db: IDBDatabase) => inTx(db, ['uploads'], 'readonly', (t) => req(t.objectStore('uploads').count()));
+
+export const uploadsFor = (db: IDBDatabase, inspectionId: string) =>
+  inTx(db, ['uploads'], 'readonly', (t) => req(t.objectStore('uploads').index('byInspection').getAll(inspectionId) as IDBRequest<UploadEntry[]>));
+
+export const getBlob = (db: IDBDatabase, hash: string) =>
+  inTx(db, ['blobs'], 'readonly', (t) => req(t.objectStore('blobs').get(hash) as IDBRequest<StoredBlobRecord | undefined>));
+
+export const dropUpload = (db: IDBDatabase, inspectionId: string, hash: string) =>
+  inTx(db, ['uploads'], 'readwrite', (t) => void t.objectStore('uploads').delete([inspectionId, hash]));

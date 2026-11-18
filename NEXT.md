@@ -1,5 +1,24 @@
 # NEXT
 
+## ▶ 2026-11-18: Walkthrough design pass PR open (branch `design/impl`, docs/design/RUN.md; Claude, unattended)
+**Built:** the Claude Design look on every Walkthrough screen: field list, checklist runner and conflict picker
+(`/field`), office inspections list, inspection detail, templates, template versions, org home, landing page, and the
+PDF report layout. Five gap artboards added first (`docs/design/FieldList`, `InspectionsList`, `Templates`,
+`TemplateEditor`, `Report`). Render layer only: sync, merge, permissions, schema and API unchanged.
+**Decided:** DECISIONS D-44 to D-58 (stylesheet, light only, the HANDOFF owner readings, office resolve via the field
+app, no mockup data, nav, PDF, axe not yet in CI). PRD gained "Design, UX and accessibility requirements" DX-01 to DX-08.
+**Reviews:** three independent reviewers (design, UX, a11y); all must-fixes fixed (conflict shows nothing chosen, focus
+never thrown to the page top, refused template form keeps its text, technician gets a plain refusal on templates).
+axe: 0 violations on 11 pages × 390/1280 px after fixes (review-time, from a scratch install; D-57).
+**Left open:** axe in CI (needs `@axe-core/playwright` dev dependency, owner call), times in local time (UTC everywhere
+today), demo seed for a technician's assigned inspections, schema errors that name the item instead of
+`sections.0.items.2`, "publish" with no changes still makes a version, office header height on a phone, PDF two-column
+answer grid and org name in the band, internal ids/links printed on the PDF.
+**Shane's hand steps:** open the Design canvas https://claude.ai/artifact/34bte4EhUD5j8Ac5pEUizz and add the five gap
+artboards if you want them there; review the PR; merge or not.
+**Gate (sandbox, Postgres 16 not 17):** lint ✓, typecheck ✓, vitest 512 pass / 28 skip / 4 fail (INV-34 export, the
+same 4 fail on the untouched branch here; CI decides), Playwright 22/22 ✓, foundation:check-modules ✓.
+
 ## ▶ 2026-11-17: v1.7.0 PR open (branch `security/v1.7.0`): A-04, A-08 (owner decisions 2026-11-17)
 Webhook endpoints are disabled with their creator's membership; a demotion below `apikeys.manage` revokes keys and disables
 endpoints. One migration (guarded; backfills creators from the audit log and disables orphans), one breaking change

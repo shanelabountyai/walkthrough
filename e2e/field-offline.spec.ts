@@ -99,12 +99,16 @@ test('two devices answer one field offline: both see the conflict, resolving on 
   await expect(pending(b.page)).toHaveText('0 changes waiting to sync', { timeout: 15_000 });
   const resolveB = b.page.getByRole('group', { name: 'Resolve Roof condition' });
   await expect(resolveB).toBeVisible();
-  await expect(resolveB.getByRole('button', { name: 'Keep pass' })).toBeVisible(); // both values kept (WT-03)
-  await expect(resolveB.getByRole('button', { name: 'Keep fail' })).toBeVisible();
+  // Design pass 2026-11-18 (Conflict artboard): both values are shown as choices, neither chosen until one is picked.
+  await expect(resolveB.getByRole('button', { name: /^Pass /, pressed: false })).toBeVisible(); // both values kept (WT-03)
+  await expect(resolveB.getByRole('button', { name: /^Fail /, pressed: false })).toBeVisible();
+  await expect(resolveB.getByRole('button', { name: 'Pick a value first' })).toBeDisabled();
   await a.page.getByRole('button', { name: 'Sync now' }).click();
   await expect(a.page.getByRole('group', { name: 'Resolve Roof condition' })).toBeVisible();
 
-  await resolveB.getByRole('button', { name: 'Keep fail' }).click(); // b has seen both: one write supersedes them
+  await resolveB.getByRole('button', { name: /^Fail / }).click(); // pick…
+  await expect(resolveB.getByRole('button', { name: /^Fail /, pressed: true })).toBeVisible();
+  await resolveB.getByRole('button', { name: 'Keep Fail' }).click(); // …then keep: b has seen both, one write supersedes them
   await expect(resolveB).toBeHidden();
   await expect(pending(b.page)).toHaveText('0 changes waiting to sync', { timeout: 15_000 });
   await a.page.getByRole('button', { name: 'Sync now' }).click();

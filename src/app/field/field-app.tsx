@@ -6,12 +6,16 @@ import { countOutbox, countUploads, getBlob, getMeta, listInspections, openDb, s
 import { refsIn } from '@/lib/walkthrough/blobs';
 import { readiness, reportRefs, WHY, type NotReady } from '@/lib/walkthrough/readiness';
 import { renderInspection, type RenderedInspection, type RenderedItem } from '@/lib/walkthrough/render';
+import { progress, rangeProblem, rangeText, valueText } from '@/app/ui/answers';
+import { Logo } from '@/app/ui/logo';
 
 // The field app (Phase 3). Everything on screen comes from IndexedDB; the network is used only to sync, and not at
 // all while "Go offline" is on (the PRD's demo toggle). docs/walkthrough/PHASE3_PLAN.md.
+// Design pass 2026-11-18: docs/design/FieldList.dc.html, Main.dc.html and Conflict.dc.html (render layer only; the
+// sync, answer and finish logic below is unchanged).
 
 const show = (v: Json) => (v === null ? '—' : typeof v === 'string' ? v : JSON.stringify(v));
-const PFN: [string, string][] = [['pass', 'Pass'], ['fail', 'Fail'], ['na', 'N/A']];
+const PFN: [string, string, string][] = [['pass', 'Pass', '✓'], ['fail', 'Fail', '✕'], ['na', 'N/A', '–']];
 
 export function FieldApp() {
   const [db, setDb] = useState<IDBDatabase | null>(null);
@@ -20,7 +24,7 @@ export function FieldApp() {
   const [forcedOffline, setForcedOffline] = useState(false);
   const [list, setList] = useState<(StoredInspection & { pending: number; conflicts: number })[]>([]);
   const [openId, setOpenId] = useState<string | null>(null);
-  const [view, setView] = useState<{ meta: StoredInspection; rendered: RenderedInspection; pending: number; uploads: number; notReady: NotReady[] } | null>(null);
+  const [view, setView] = useState<{ meta: StoredInspection; rendered: RenderedInspection; pending: number; uploads: number; notReady: NotReady[]; pendingPaths: Set<string>; queued: Set<string> } | null>(null);
   const [pending, setPending] = useState(0);
   const [uploads, setUploads] = useState(0);
   const [report, setReport] = useState<{ id: string; url: string; number: number } | null>(null);
@@ -28,6 +32,8 @@ export function FieldApp() {
   const [status, setStatus] = useState('Starting…');
   const [lastSync, setLastSync] = useState<string | null>(null);
   const syncing = useRef(false);
+  const wantOpen = useRef<string | null>(null); // ?open=<id>: the office's "Resolve in the field app" link
+  const heading = useRef<HTMLHeadingElement | null>(null);
   const canNet = online && !forcedOffline;
 
   const refresh = useCallback(async (d: IDBDatabase, id: string | null) => {
@@ -50,7 +56,9 @@ export function FieldApp() {
         // On the device, a blob counts as uploaded once it has left this device's upload queue; the server re-checks.
         const queued = new Set((await uploadsFor(d, id)).map((u) => u.hash));
         const notReady = readiness(rendered, new Set(reportRefs(rendered).filter((h) => !queued.has(h))));
-        setView({ meta: got.meta, rendered, pending: got.replica.outbox.size, uploads: queued.size, notReady });
+        // Which answers are still only on this phone (their op is in the outbox), for the per-item "saved" line.
+        const pendingPaths = new Set([...got.replica.outbox].map((opId) => got.replica.log.get(opId)).flatMap((op) => (op?.kind === 'set' ? [op.path] : [])));
+        setView({ meta: got.meta, rendered, pending: got.replica.outbox.size, uploads: queued.size, notReady, pendingPaths, queued });
       } else setView(null);
     } else setView(null);
   }, []);
@@ -61,7 +69,9 @@ export function FieldApp() {
     (async () => {
       const d = await openDb();
       if (cancelled) return;
-      const fromUrl = new URLSearchParams(location.search).get('org');
+      const q = new URLSearchParams(location.search);
+      const fromUrl = q.get('org');
+      wantOpen.current = q.get('open');
       const o = fromUrl ?? (await getMeta<string>(d, 'lastOrg')) ?? null;
       if (o) await setMeta(d, 'lastOrg', o);
       setForcedOffline((await getMeta<boolean>(d, 'forcedOffline')) ?? false);
@@ -183,138 +193,242 @@ export function FieldApp() {
   const open = async (id: string | null) => {
     setOpenId(id);
     if (db) await refresh(db, id);
+    requestAnimationFrame(() => heading.current?.focus()); // a screen reader hears where it landed
   };
 
+  // Open the inspection the office linked to, once it is on this device (it may arrive with the first sync).
+  useEffect(() => {
+    const want = wantOpen.current;
+    if (want && !openId && list.some((i) => i.id === want)) {
+      wantOpen.current = null;
+      void open(want);
+    }
+  }, [list]); // eslint-disable-line react-hooks/exhaustive-deps -- runs when the list changes; open is stable enough here
+
   const mode = !online ? 'Offline (no network)' : forcedOffline ? 'Offline (demo toggle)' : 'Online';
+  const busy = pending > 0 || uploads > 0;
+  const glyph = !canNet ? '○' : busy ? '◐' : '✓';
+  const prog = view ? progress(view.rendered.sections) : null;
+  const items = view ? view.rendered.sections.flatMap((s) => s.items) : [];
+  const conflicted = items.filter((i) => i.conflict);
   return (
-    <main>
-      <header>
-        <h1>Walkthrough</h1>
-        <p>
-          <strong data-testid="mode">{mode}</strong> · <span data-testid="pending">{pending} change{pending === 1 ? '' : 's'} waiting to sync</span> ·{' '}
-          <span data-testid="uploads">{uploads} photo{uploads === 1 ? '' : 's'} waiting to upload</span>
-          {lastSync && <> · last synced {lastSync.slice(11, 16)} UTC</>}
-        </p>
-        <p role="status">{status}</p>
-        <button type="button" aria-pressed={forcedOffline} onClick={toggleOffline}>
-          {forcedOffline ? 'Go online' : 'Go offline'}
-        </button>{' '}
-        <button type="button" onClick={() => void runSync()} disabled={!canNet || !org}>
-          Sync now
-        </button>
-        {org && (
-          <> · <a href={`/o/${encodeURIComponent(org)}/inspections`}>Back to {org}</a></>
-        )}
+    <div className="wt-field-app">
+      <header className="wt-fhead">
+        <div className="wt-fhead-in">
+          <div className="wt-fhead-row">
+            {view ? (
+              <h1 ref={heading} tabIndex={-1}>
+                {view.meta.title}
+              </h1>
+            ) : (
+              <span className="wt-brand">
+                <Logo size={24} />
+                Walkthrough
+              </span>
+            )}
+            {view ? (
+              <span className="wt-pin">Template v{view.rendered.templateVersion} (pinned)</span>
+            ) : (
+              org && <a href={`/o/${encodeURIComponent(org)}/inspections`}>Back to {org}</a>
+            )}
+          </div>
+          <div className={`wt-bar ${canNet ? 'wt-bar-on' : 'wt-bar-off'}`}>
+            <span className="wt-bar-word">
+              <span aria-hidden="true">{glyph}</span>
+              <strong data-testid="mode">{mode}</strong>
+            </span>
+            <span className="wt-bar-note">
+              <span data-testid="pending">
+                {pending} change{pending === 1 ? '' : 's'} waiting to sync
+              </span>
+              <span data-testid="uploads">
+                {uploads} photo{uploads === 1 ? '' : 's'} waiting to upload
+              </span>
+            </span>
+          </div>
+          <div className="wt-controls">
+            <button type="button" aria-pressed={forcedOffline} onClick={toggleOffline}>
+              {forcedOffline ? 'Go online' : 'Go offline'}
+            </button>
+            <button type="button" onClick={() => void runSync()} disabled={!canNet || !org}>
+              Sync now
+            </button>
+          </div>
+          <p className="wt-statusline">
+            <span role="status">{status}</span>
+            {lastSync && <span> · last synced {lastSync.slice(11, 16)} UTC</span>}
+          </p>
+        </div>
       </header>
 
-      {!view && (
-        <section>
-          <h2>Inspections on this device</h2>
-          {!list.length && <p>None yet. They download the first time you open this page online.</p>}
-          <ul>
-            {list.map((i) => (
-              <li key={i.id}>
-                <button type="button" onClick={() => void open(i.id)}>
-                  {i.title}
-                </button>{' '}
-                v{i.templateVersion}
-                {i.pending > 0 && <> · {i.pending} waiting</>}
-                {i.conflicts > 0 && <strong> · resolve ({i.conflicts})</strong>}
-                {i.gone && <em> · no longer assigned to you</em>}
-              </li>
-            ))}
-          </ul>
-        </section>
-      )}
-
-      {view && (
-        <section aria-label={view.meta.title}>
-          <button type="button" onClick={() => void open(null)}>
-            ← All inspections
-          </button>
-          <h2>{view.meta.title}</h2>
-          <p>
-            Template version {view.rendered.templateVersion} · {view.pending} waiting
-            {view.uploads > 0 && <> · {view.uploads} photo{view.uploads === 1 ? '' : 's'} to upload</>}
-            {view.rendered.conflicts.length > 0 && <strong> · Resolve: {view.rendered.conflicts.length}</strong>}
-            {view.meta.truckroll && (
-              <>
-                {' '}· <a href={view.meta.truckroll} target="_blank" rel="noopener noreferrer">Open this day in Truckroll</a>
-              </>
-            )}
-          </p>
-          {view.rendered.sections.map((s) => (
-            <section key={s.key}>
-              <h3>{s.title}</h3>
-              {s.items.map((i) => (
-                <Item
-                  key={i.path}
-                  item={i}
-                  blobs={{ db, org, id: view.meta.id }}
-                  onAnswer={(v) => void write(i.path, v)}
-                  onPhotos={(files) => void onPhotos(i.path, files)}
-                  onRemovePhoto={(h) => void onRemovePhoto(i.path, h)}
-                  onSign={(png) => void onSign(i.path, png)}
-                />
+      <main className="wt-fmain">
+        {!view && (
+          <section aria-labelledby="mine" style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
+            <h1 id="mine" ref={heading} tabIndex={-1} style={{ margin: 0, fontSize: 20 }}>
+              My inspections
+            </h1>
+            <p className="wt-note-14">
+              Assigned to you and saved on this phone. They open without signal. &ldquo;Go offline&rdquo; is a demo toggle: it stops every network call, like a basement with no signal.
+            </p>
+            {!list.length && <p className="wt-note-14">{org ? 'None yet. They download the first time you open this page online.' : 'Open the field app from your org’s Inspections page once while online.'}</p>}
+            <ul className="wt-cards">
+              {list.map((i) => (
+                <li key={i.id}>
+                  <button type="button" className="wt-icard" onClick={() => void open(i.id)}>
+                    <span className="wt-icard-title">{i.title}</span>
+                    <span className="wt-icard-meta">Template version {i.templateVersion} (pinned)</span>
+                    {i.conflicts > 0 ? (
+                      <span className="wt-s wt-s-warn">
+                        <span aria-hidden="true">◆ </span>
+                        {i.conflicts} to resolve
+                      </span>
+                    ) : i.pending > 0 ? (
+                      <span className="wt-s wt-s-wait">
+                        <span aria-hidden="true">○ </span>
+                        {i.pending} waiting to sync
+                      </span>
+                    ) : (
+                      <span className="wt-s wt-s-ok">
+                        <span aria-hidden="true">✓ </span>
+                        Nothing waiting
+                      </span>
+                    )}
+                    {i.gone && <span className="wt-s wt-s-na">No longer assigned to you</span>}
+                  </button>
+                </li>
               ))}
-            </section>
-          ))}
-          <section aria-label="Finish">
-            <h3>Finish</h3>
-            {view.notReady.length > 0 ? (
-              <ul aria-label="Before you can finish">
-                {view.notReady.map((n) => (
-                  <li key={`${n.path}:${n.why}`}>
-                    {n.label} {n.why === 'uploading' ? 'has a photo or signature waiting to upload' : WHY[n.why]}
-                  </li>
-                ))}
-              </ul>
-            ) : (
-              <p>Everything required is answered.</p>
-            )}
-            {reasons.length > 0 && (
-              <ul aria-label="The server says">
-                {reasons.map((r) => (
-                  <li key={r}>{r}</li>
-                ))}
-              </ul>
-            )}
-            <button type="button" onClick={() => void onFinish()} disabled={!canNet}>
-              Finish and make report
+            </ul>
+          </section>
+        )}
+
+        {view && prog && (
+          <>
+            <button type="button" className="wt-back" onClick={() => void open(null)}>
+              ← All inspections
             </button>
-            {!canNet && <em> (needs a connection)</em>}
-            {report && report.id === view.meta.id && (
-              <>
-                {' '}
-                <a href={report.url} target="_blank" rel="noopener">
+            <div className="wt-progress">
+              <span>
+                {prog.answered} of {prog.total} answered · {view.pending} waiting
+                {view.uploads > 0 && (
+                  <>
+                    {' '}
+                    · {view.uploads} photo{view.uploads === 1 ? '' : 's'} to upload
+                  </>
+                )}
+              </span>
+              {view.meta.truckroll && (
+                <a href={view.meta.truckroll} target="_blank" rel="noopener noreferrer">
+                  Open this day in Truckroll<span className="wt-sr"> (opens in a new tab)</span>
+                </a>
+              )}
+            </div>
+            {conflicted.length > 0 && (
+              <section className="wt-banner" aria-labelledby="to-resolve">
+                <strong id="to-resolve">
+                  <span aria-hidden="true">◆ </span>
+                  {conflicted.length} answer{conflicted.length === 1 ? '' : 's'} need{conflicted.length === 1 ? 's' : ''} resolving
+                </strong>
+                <p>Two devices changed the same answer while one was offline. Both are kept. Nothing was overwritten.</p>
+                <ul>
+                  {conflicted.map((i) => (
+                    <li key={i.path}>
+                      <a href={`#${anchor(i.path)}`}>Go to {i.item.label}</a>
+                    </li>
+                  ))}
+                </ul>
+              </section>
+            )}
+            {view.rendered.sections.map((s) => (
+              <section key={s.key} aria-labelledby={`s-${s.key}`} style={{ display: 'flex', flexDirection: 'column', gap: 14 }}>
+                <h2 id={`s-${s.key}`} className="wt-section">
+                  {s.title}
+                </h2>
+                {s.items.map((i) => (
+                  <Item
+                    key={i.path}
+                    item={i}
+                    blobs={{ db, org, id: view.meta.id }}
+                    myDevice={view.meta.deviceId}
+                    waiting={view.pendingPaths.has(i.path)}
+                    queued={view.queued}
+                    onAnswer={(v) => void write(i.path, v)}
+                    onPhotos={(files) => void onPhotos(i.path, files)}
+                    onRemovePhoto={(h) => void onRemovePhoto(i.path, h)}
+                    onSign={(png) => void onSign(i.path, png)}
+                  />
+                ))}
+              </section>
+            ))}
+            {view.rendered.unknownFields.length > 0 && (
+              <section className="wt-q wt-q-warn wt-offtpl" aria-labelledby="offtpl">
+                <h2 id="offtpl" className="wt-q-label">
+                  Answers to items not in version {view.rendered.templateVersion}
+                </h2>
+                <p className="wt-note">Kept, never dropped: another device wrote these against a different template version.</p>
+                <ul className="wt-list">
+                  {view.rendered.unknownFields.map((u) => (
+                    <li key={u.path}>
+                      {u.path}: {u.field.heads.map((h) => show(h.value)).join(' / ')}
+                    </li>
+                  ))}
+                </ul>
+              </section>
+            )}
+            <section className="wt-q wt-finish" aria-labelledby="finish">
+              <h2 id="finish">Finish</h2>
+              {view.notReady.length > 0 ? (
+                <ul className="wt-todo" aria-label="Before you can finish">
+                  {view.notReady.map((n) => (
+                    <li key={`${n.path}:${n.why}`}>
+                      {n.label} {n.why === 'uploading' ? 'has a photo or signature waiting to upload' : WHY[n.why]}
+                    </li>
+                  ))}
+                </ul>
+              ) : (
+                <p className="wt-s wt-s-ok" style={{ margin: 0 }}>
+                  <span aria-hidden="true">✓ </span>Everything required is answered.
+                </p>
+              )}
+              {reasons.length > 0 && (
+                <ul className="wt-todo wt-alert" aria-label="The server says">
+                  {reasons.map((r) => (
+                    <li key={r}>{r}</li>
+                  ))}
+                </ul>
+              )}
+              <button type="button" className="wt-primary" onClick={() => void onFinish()} disabled={!canNet} aria-describedby={!canNet ? 'needs-net' : undefined}>
+                Finish and make report
+              </button>
+              {!canNet && (
+                <p id="needs-net" className="wt-note">
+                  Finishing needs a connection: the server checks everything and builds the PDF.
+                </p>
+              )}
+              {report && report.id === view.meta.id && (
+                <a className="wt-fbtn" style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', textDecoration: 'none' }} href={report.url} target="_blank" rel="noopener">
                   Open report {report.number} (PDF)
                 </a>
-              </>
-            )}
-          </section>
-          {view.rendered.unknownFields.length > 0 && (
-            <section>
-              <h3>Answers to items not in version {view.rendered.templateVersion}</h3>
-              <ul>
-                {view.rendered.unknownFields.map((u) => (
-                  <li key={u.path}>
-                    {u.path}: {u.field.heads.map((h) => show(h.value)).join(' / ')}
-                  </li>
-                ))}
-              </ul>
+              )}
             </section>
-          )}
-        </section>
-      )}
-    </main>
+            <p className="wt-note">Everything you enter is saved on this phone first. It uploads on its own when you have signal.</p>
+          </>
+        )}
+      </main>
+    </div>
   );
 }
+
+/** An element id for an item path (paths are `items.<key>`, keys are lowercase letters, digits and dashes). */
+const anchor = (path: string) => `q-${path.replace(/[^a-z0-9-]/g, '-')}`;
 
 type BlobCtx = { db: IDBDatabase | null; org: string | null; id: string };
 
 function Item({
   item: i,
   blobs,
+  myDevice,
+  waiting,
+  queued,
   onAnswer,
   onPhotos,
   onRemovePhoto,
@@ -322,66 +436,144 @@ function Item({
 }: {
   item: RenderedItem;
   blobs: BlobCtx;
+  myDevice: string;
+  waiting: boolean;
+  queued: ReadonlySet<string>;
   onAnswer: (v: Json) => void;
   onPhotos: (files: File[]) => void;
   onRemovePhoto: (hash: string) => void;
   onSign: (png: Uint8Array) => void;
 }) {
   const it = i.item;
-  const label = `${it.label}${it.required ? ' *' : ''}`;
+  const id = anchor(i.path);
+  const req = it.required ? (
+    <span className="wt-req">
+      {' *'} required
+    </span>
+  ) : null;
   // Remount uncontrolled inputs when the merged value changes (a sync brought someone else's answer).
   const k = `${i.path}:${JSON.stringify(i.value)}`;
-  let input: React.ReactNode;
+  const problem = rangeProblem(it, i.value);
+  const saved = i.answered ? (
+    <span className="wt-saved">
+      {waiting ? (
+        <>
+          <span aria-hidden="true">◐ </span>Saved on this phone · waiting to sync
+        </>
+      ) : (
+        <>
+          <span aria-hidden="true">✓ </span>Saved and synced
+        </>
+      )}
+    </span>
+  ) : null;
+  const unfit = !i.valid && !problem ? <p className="wt-err">✕ This answer does not fit this item.</p> : null;
+  const resolve = i.conflict ? <Resolve item={i} myDevice={myDevice} blobs={blobs} onKeep={onAnswer} /> : null;
+  const cls = `wt-q${i.conflict ? ' wt-q-warn' : ''}`;
+
   if (it.type === 'pass_fail_na') {
-    input = (
-      <fieldset key={k}>
-        <legend>{label}</legend>
-        {PFN.map(([v, l]) => (
-          <label key={v}>
-            <input type="radio" name={i.path} value={v} defaultChecked={i.value === v} onChange={() => onAnswer(v)} /> {l}
-          </label>
-        ))}
+    return (
+      <fieldset key={k} id={id} className={cls} data-path={i.path}>
+        <legend className="wt-q-label">
+          {it.label}
+          {req}
+        </legend>
+        <div className="wt-seg">
+          {PFN.map(([v, l, g]) => (
+            <label key={v}>
+              <input type="radio" name={i.path} value={v} defaultChecked={i.value === v} onChange={() => onAnswer(v)} />
+              <span aria-hidden="true">{g}</span> {l}
+            </label>
+          ))}
+        </div>
+        {unfit}
+        {saved}
+        {resolve}
       </fieldset>
     );
-  } else if (it.type === 'number' || it.type === 'text') {
+  }
+  if (it.type === 'number' || it.type === 'text') {
     const commit = (raw: string) => {
       const v: Json = raw === '' ? null : it.type === 'number' ? Number(raw) : raw;
       if (JSON.stringify(v) !== JSON.stringify(i.value) && !(typeof v === 'number' && Number.isNaN(v))) onAnswer(v);
     };
+    const inputId = `${id}-in`;
+    const hint = rangeText(it);
+    const described = [hint && `${id}-hint`, problem && `${id}-err`].filter(Boolean).join(' ') || undefined;
     const common = {
-      'aria-label': it.label,
+      id: inputId,
+      'aria-describedby': described,
       defaultValue: i.value === null ? '' : String(i.value),
       onBlur: (e: React.FocusEvent<HTMLInputElement | HTMLTextAreaElement>) => commit(e.currentTarget.value),
     };
-    input = (
-      <label>
-        {label}{' '}
+    return (
+      <div id={id} className={cls} data-path={i.path}>
+        <div>
+          <label htmlFor={inputId} className="wt-q-label">
+            {it.label}
+            {req}
+          </label>{' '}
+          {hint && (
+            <span id={`${id}-hint`} className="wt-hint">
+              {hint}
+            </span>
+          )}
+        </div>
         {it.type === 'number' ? (
-          <input key={k} type="number" step="any" min={it.min} max={it.max} {...common} onKeyDown={(e) => e.key === 'Enter' && commit(e.currentTarget.value)} />
+          <input
+            key={k}
+            className="wt-num"
+            type="number"
+            step="any"
+            inputMode="decimal"
+            min={it.min}
+            max={it.max}
+            aria-invalid={problem ? true : undefined}
+            {...common}
+            onKeyDown={(e) => e.key === 'Enter' && commit(e.currentTarget.value)}
+          />
         ) : (
-          <textarea key={k} maxLength={it.maxLength} {...common} />
+          <textarea key={k} className="wt-text" maxLength={it.maxLength} {...common} />
         )}
-        {it.type === 'number' && it.unit && <> {it.unit}</>}
-      </label>
+        {problem && (
+          <p id={`${id}-err`} className="wt-err">
+            <span aria-hidden="true">✕ </span>
+            {problem}
+          </p>
+        )}
+        {unfit}
+        {saved}
+        {resolve}
+      </div>
     );
-  } else if (it.type === 'photo') {
+  }
+  if (it.type === 'photo') {
     const photos = refsIn(i.value);
-    input = (
-      <fieldset>
-        <legend>{label}</legend>
-        <ul aria-label={`Photos: ${it.label}`} style={{ listStyle: 'none', padding: 0, display: 'flex', flexWrap: 'wrap', gap: 8 }}>
-          {photos.map((h, n) => (
-            <li key={h}>
-              <BlobImage ctx={blobs} hash={h} alt={`${it.label}, photo ${n + 1}`} height={96} />
-              <br />
-              <button type="button" onClick={() => onRemovePhoto(h)}>
-                Remove photo {n + 1}
-              </button>
-            </li>
-          ))}
-        </ul>
-        <label>
-          Add photo{' '}
+    return (
+      <fieldset id={id} className={cls} data-path={i.path}>
+        <legend className="wt-q-label">
+          {it.label}
+          {req}
+        </legend>
+        {photos.length > 0 && (
+          <ul aria-label={`Photos: ${it.label}`} className="wt-photos">
+            {photos.map((h, n) => (
+              <li key={h}>
+                <BlobImage ctx={blobs} hash={h} alt={`${it.label}, photo ${n + 1}`} height={99} />
+                <span className={`wt-photo-state wt-s-${queued.has(h) ? 'wait' : 'ok'}`}>
+                  <span aria-hidden="true">{queued.has(h) ? '◐ ' : '✓ '}</span>
+                  {queued.has(h) ? 'Waiting to upload' : 'Uploaded'}
+                </span>
+                <button type="button" className="wt-link-btn" onClick={() => onRemovePhoto(h)}>
+                  Remove photo {n + 1}
+                </button>
+              </li>
+            ))}
+          </ul>
+        )}
+        {!photos.length && <span className="wt-note">No photo yet.</span>}
+        <label className="wt-addphoto">
+          {photos.length ? 'Add another photo' : 'Take or add a photo'}
           <input
             type="file"
             accept="image/*"
@@ -395,32 +587,68 @@ function Item({
             }}
           />
         </label>
-      </fieldset>
-    );
-  } else {
-    input = (
-      <fieldset>
-        <legend>{label}</legend>
-        {refsIn(i.value).length > 0 && <BlobImage ctx={blobs} hash={refsIn(i.value)[0]!} alt={`Signature: ${it.label}`} height={80} />}
-        <SignaturePad label={it.label} signed={i.value !== null} onSave={onSign} />
+        {photos.length > 0 && <span className="wt-note">Photos upload in pieces when you have signal. They stay on this phone either way.</span>}
+        {unfit}
+        {resolve}
       </fieldset>
     );
   }
+  const sig = refsIn(i.value);
   return (
-    <div data-path={i.path}>
-      {input}
-      {!i.valid && <em> does not fit this item</em>}
-      {i.conflict && (
-        <div role="group" aria-label={`Resolve ${it.label}`}>
-          <strong>Conflicting answers:</strong>{' '}
-          {i.heads.map((h) => (
-            <button key={h.opId} type="button" onClick={() => onAnswer(h.value)}>
-              Keep {show(h.value)}
-              {h.offTemplate ? ` (v${h.templateVersion})` : ''}
-            </button>
-          ))}
-        </div>
+    <fieldset id={id} className={cls} data-path={i.path}>
+      <legend className="wt-q-label">
+        {it.label}
+        {req}
+      </legend>
+      {sig.length > 0 && (
+        <>
+          <BlobImage ctx={blobs} hash={sig[0]!} alt={`Signature: ${it.label}`} height={80} className="wt-sigimg" />
+          <span className={`wt-photo-state wt-s-${queued.has(sig[0]!) ? 'wait' : 'ok'}`}>
+            <span aria-hidden="true">{queued.has(sig[0]!) ? '◐ ' : '✓ '}</span>
+            {queued.has(sig[0]!) ? 'Signed · waiting to upload' : 'Signed · uploaded'}
+          </span>
+        </>
       )}
+      <SignaturePad label={it.label} signed={i.value !== null} onSave={onSign} />
+      {unfit}
+      {resolve}
+    </fieldset>
+  );
+}
+
+/**
+ * Pick one of the kept values, then confirm (Conflict artboard). Neither is chosen until the technician picks; the
+ * keep writes that value as one op that supersedes every competing head (the same write the old "Keep" button made).
+ */
+function Resolve({ item: i, myDevice, blobs, onKeep }: { item: RenderedItem; myDevice: string; blobs: BlobCtx; onKeep: (v: Json) => void }) {
+  const [picked, setPicked] = useState<string | null>(null);
+  const chosen = i.heads.find((h) => h.opId === picked) ?? null;
+  return (
+    <div role="group" aria-label={`Resolve ${i.item.label}`} className="wt-resolve">
+      <strong>
+        <span aria-hidden="true">◆ </span>
+        {i.heads.length} values kept. Pick the one to keep.
+      </strong>
+      <span className="wt-note">Neither is chosen until you pick. The other value stays in the history.</span>
+      {i.heads.map((h, n) => (
+        <button key={h.opId} type="button" className="wt-pick" aria-pressed={picked === h.opId} onClick={() => setPicked(h.opId)}>
+          <span className="wt-pick-v">{valueText(i.item, h.value)}</span>{' '}
+          {(i.item.type === 'photo' || i.item.type === 'signature') && refsIn(h.value).length > 0 && (
+            <span className="wt-thumbs" aria-hidden="true">
+              {refsIn(h.value).map((r) => (
+                <BlobImage key={r} ctx={blobs} hash={r} alt="" height={48} />
+              ))}
+            </span>
+          )}
+          <span className="wt-pick-who">
+            Value {n + 1} · {h.deviceId === myDevice ? 'this device' : 'another device'}
+            {h.offTemplate ? ` · written on template v${h.templateVersion}` : ''}
+          </span>
+        </button>
+      ))}
+      <button type="button" className="wt-primary" disabled={!chosen} onClick={() => chosen && onKeep(chosen.value)}>
+        {chosen ? `Keep ${valueText(i.item, chosen.value)}` : 'Pick a value first'}
+      </button>
     </div>
   );
 }
@@ -444,7 +672,7 @@ async function prepareImage(file: File): Promise<{ bytes: Uint8Array; type: stri
 }
 
 /** A photo or signature from IndexedDB when this device has it (offline too), else from the server. */
-function BlobImage({ ctx, hash, alt, height }: { ctx: BlobCtx; hash: string; alt: string; height: number }) {
+function BlobImage({ ctx, hash, alt, height, className }: { ctx: BlobCtx; hash: string; alt: string; height: number; className?: string }) {
   const [src, setSrc] = useState<string | null>(null);
   useEffect(() => {
     let url: string | null = null;
@@ -462,15 +690,42 @@ function BlobImage({ ctx, hash, alt, height }: { ctx: BlobCtx; hash: string; alt
       if (url) URL.revokeObjectURL(url);
     };
   }, [ctx.db, ctx.org, ctx.id, hash]);
+  if (!src) return alt ? <span className="wt-photo-missing">{alt} (not on this device yet)</span> : null;
   // eslint-disable-next-line @next/next/no-img-element -- a blob: URL from IndexedDB, not an optimizable asset
-  return src ? <img src={src} alt={alt} height={height} data-hash={hash} style={{ border: '1px solid #ccc', background: '#fff' }} /> : <span>{alt} (not on this device yet)</span>;
+  return <img src={src} alt={alt} height={height} data-hash={hash} className={className} />;
 }
 
-/** Draw with a finger, stylus or mouse; Save stores a PNG (white background) as the signature answer. */
+const PAD_W = 480;
+const PAD_H = 180;
+
+/** A typed name drawn as a signature image: the same PNG answer a drawn one makes (owner reading: draw or type). */
+export function typedSignaturePng(name: string): Promise<Uint8Array | null> {
+  const c = document.createElement('canvas');
+  c.width = PAD_W;
+  c.height = PAD_H;
+  const g = c.getContext('2d')!;
+  g.fillStyle = '#fff';
+  g.fillRect(0, 0, PAD_W, PAD_H);
+  g.fillStyle = '#111';
+  g.textBaseline = 'middle';
+  let size = 56;
+  const font = (n: number) => `italic ${n}px "Segoe Script", "Brush Script MT", "Snell Roundhand", cursive`;
+  g.font = font(size);
+  while (size > 18 && g.measureText(name).width > PAD_W - 40) g.font = font(--size);
+  g.fillText(name, 20, PAD_H / 2);
+  g.fillStyle = '#555';
+  g.font = '14px system-ui, sans-serif';
+  g.fillText('Typed by the signer', 20, PAD_H - 18);
+  return new Promise((r) => c.toBlob(async (b) => r(b ? new Uint8Array(await b.arrayBuffer()) : null), 'image/png'));
+}
+
+/** Draw with a finger, stylus or mouse, or type a name; Save stores a PNG (white background) as the signature answer. */
 function SignaturePad({ label, signed, onSave }: { label: string; signed: boolean; onSave: (png: Uint8Array) => void }) {
   const canvas = useRef<HTMLCanvasElement | null>(null);
   const drawing = useRef(false);
   const [open, setOpen] = useState(!signed);
+  const [typing, setTyping] = useState(false);
+  const [name, setName] = useState('');
   const [inked, setInked] = useState(false);
   const clear = () => {
     const c = canvas.current;
@@ -481,8 +736,8 @@ function SignaturePad({ label, signed, onSave }: { label: string; signed: boolea
     setInked(false);
   };
   useEffect(() => {
-    if (open) clear();
-  }, [open]);
+    if (open && !typing) clear();
+  }, [open, typing]);
   const at = (e: React.PointerEvent<HTMLCanvasElement>) => {
     const c = e.currentTarget;
     const r = c.getBoundingClientRect();
@@ -490,58 +745,95 @@ function SignaturePad({ label, signed, onSave }: { label: string; signed: boolea
   };
   if (!open)
     return (
-      <button type="button" onClick={() => setOpen(true)}>
+      <button type="button" className="wt-fbtn wt-self-start" onClick={() => setOpen(true)}>
         Sign again
       </button>
     );
+  if (typing)
+    return (
+      <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+        <label className="wt-field" style={{ fontWeight: 600 }}>
+          Signer&rsquo;s full name
+          <input className="wt-num" style={{ fontSize: 18, fontWeight: 400 }} value={name} onChange={(e) => setName(e.currentTarget.value)} autoComplete="name" maxLength={80} />
+        </label>
+        <span className="wt-note">The typed name is saved as the signature image, the same way a drawn one is.</span>
+        <div className="wt-row-btns">
+          <button
+            type="button"
+            className="wt-fbtn wt-fbtn-1"
+            disabled={!name.trim()}
+            onClick={async () => {
+              const png = await typedSignaturePng(name.trim());
+              if (png) {
+                onSave(png);
+                setOpen(false);
+              }
+            }}
+          >
+            Save signature
+          </button>
+          <button type="button" className="wt-link-btn" onClick={() => setTyping(false)}>
+            Draw instead
+          </button>
+        </div>
+      </div>
+    );
   return (
-    <div>
-      <canvas
-        ref={canvas}
-        width={480}
-        height={180}
-        aria-label={`Signature pad: ${label}`}
-        style={{ width: '100%', maxWidth: 480, height: 'auto', border: '1px solid #888', touchAction: 'none', background: '#fff' }}
-        onPointerDown={(e) => {
-          drawing.current = true;
-          e.currentTarget.setPointerCapture(e.pointerId);
-          const g = e.currentTarget.getContext('2d')!;
-          const [x, y] = at(e);
-          g.lineWidth = 3;
-          g.lineCap = 'round';
-          g.strokeStyle = '#111';
-          g.beginPath();
-          g.moveTo(x, y);
-        }}
-        onPointerMove={(e) => {
-          if (!drawing.current) return;
-          const g = e.currentTarget.getContext('2d')!;
-          const [x, y] = at(e);
-          g.lineTo(x, y);
-          g.stroke();
-          setInked(true);
-        }}
-        onPointerUp={() => {
-          drawing.current = false;
-        }}
-      />
-      <br />
-      <button
-        type="button"
-        disabled={!inked}
-        onClick={() =>
-          canvas.current?.toBlob(async (b) => {
-            if (!b) return;
-            onSave(new Uint8Array(await b.arrayBuffer()));
-            setOpen(false);
-          }, 'image/png')
-        }
-      >
-        Save signature
-      </button>{' '}
-      <button type="button" onClick={clear}>
-        Clear
-      </button>
+    <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+      <div className="wt-sigwrap">
+        <canvas
+          ref={canvas}
+          width={PAD_W}
+          height={PAD_H}
+          aria-label={`Signature pad: ${label}`}
+          className="wt-sigpad"
+          onPointerDown={(e) => {
+            drawing.current = true;
+            e.currentTarget.setPointerCapture(e.pointerId);
+            const g = e.currentTarget.getContext('2d')!;
+            const [x, y] = at(e);
+            g.lineWidth = 3;
+            g.lineCap = 'round';
+            g.strokeStyle = '#111';
+            g.beginPath();
+            g.moveTo(x, y);
+          }}
+          onPointerMove={(e) => {
+            if (!drawing.current) return;
+            const g = e.currentTarget.getContext('2d')!;
+            const [x, y] = at(e);
+            g.lineTo(x, y);
+            g.stroke();
+            setInked(true);
+          }}
+          onPointerUp={() => {
+            drawing.current = false;
+          }}
+        />
+        {!inked && <span aria-hidden="true">Sign here with a finger</span>}
+      </div>
+      <div className="wt-row-btns">
+        <button
+          type="button"
+          className="wt-fbtn wt-fbtn-1"
+          disabled={!inked}
+          onClick={() =>
+            canvas.current?.toBlob(async (b) => {
+              if (!b) return;
+              onSave(new Uint8Array(await b.arrayBuffer()));
+              setOpen(false);
+            }, 'image/png')
+          }
+        >
+          Save signature
+        </button>
+        <button type="button" className="wt-fbtn" onClick={clear}>
+          Clear
+        </button>
+        <button type="button" className="wt-link-btn" onClick={() => setTyping(true)}>
+          Type name instead
+        </button>
+      </div>
     </div>
   );
 }

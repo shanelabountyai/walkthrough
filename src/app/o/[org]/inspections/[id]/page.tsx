@@ -236,7 +236,7 @@ export default async function InspectionPage({ params }: { params: Promise<{ org
           </ol>
           <p className="wt-note">Times are UTC, when the server received each change.</p>
         </section>
-        <section className="wt-card wt-card-pad" aria-labelledby="links">
+        <section className="wt-card wt-card-pad wt-links" aria-labelledby="links">
           <h2 id="links">Links</h2>
           <a href={field}>Open in the field app</a>
           <a href={truckroll} target="_blank" rel="noopener noreferrer">

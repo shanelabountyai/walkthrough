@@ -3,8 +3,11 @@ import { notFound } from 'next/navigation';
 import { z } from 'zod';
 import { inOrg, requireOrg } from '@/core/authz/guards';
 import { withOrg } from '@/core/db/rls';
+import { can } from '@/core/authz/permissions';
 import { ActionForm } from '@/core/ui/action-form';
 import { definitionSchema } from '@/lib/walkthrough/template';
+import { KeptTextarea } from '../definition-field';
+import { ManagersOnly } from '../managers-only';
 import { DefinitionHelp } from '../definition-help';
 import { publishTemplateVersion } from '../actions';
 
@@ -23,7 +26,9 @@ function shapeOf(definition: unknown): string {
 // One template's versions. Published versions never change (WT-04); saving publishes version n+1 (D-17).
 // Design pass 2026-11-18: docs/design/TemplateEditor.dc.html.
 export default async function TemplatePage({ params }: { params: Promise<{ org: string; id: string }> }) {
-  const ctx = await requireOrg((await params).org, 'org.update');
+  const ctx = await requireOrg((await params).org);
+  // Managers only (D-16). A technician who follows an old link gets a plain refusal, not the error page (PRD DX-06).
+  if (!can(ctx.role, 'org.update')) return <ManagersOnly slug={ctx.slug} />;
   const id = z.uuid().safeParse((await params).id);
   if (!id.success) notFound();
   const t = await withOrg(
@@ -65,7 +70,7 @@ export default async function TemplatePage({ params }: { params: Promise<{ org: 
               <input type="hidden" name="id" value={t.id} />
               <div className="wt-field">
                   <label htmlFor="definition">Definition (JSON)</label>
-                  <textarea id="definition" className="wt-input wt-code" name="definition" rows={22} spellCheck={false} aria-describedby="def-help" defaultValue={JSON.stringify(latest?.definition ?? {}, null, 2)} />
+                  <KeptTextarea id="definition" className="wt-input wt-code" name="definition" rows={22} spellCheck={false} aria-describedby="def-help" defaultValue={JSON.stringify(latest?.definition ?? {}, null, 2)} />
                 </div>
               <DefinitionHelp />
               <button className="wt-btn wt-self-start" type="submit">

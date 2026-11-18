@@ -22,7 +22,7 @@ export function FieldApp() {
   const [org, setOrg] = useState<string | null>(null);
   const [online, setOnline] = useState(true);
   const [forcedOffline, setForcedOffline] = useState(false);
-  const [list, setList] = useState<(StoredInspection & { pending: number; conflicts: number })[]>([]);
+  const [list, setList] = useState<(StoredInspection & { pending: number; conflicts: number; answered: number; total: number })[]>([]);
   const [openId, setOpenId] = useState<string | null>(null);
   const [view, setView] = useState<{ meta: StoredInspection; rendered: RenderedInspection; pending: number; uploads: number; notReady: NotReady[]; pendingPaths: Set<string>; queued: Set<string> } | null>(null);
   const [pending, setPending] = useState(0);
@@ -45,7 +45,15 @@ export function FieldApp() {
       all.map(async (i) => {
         const got = await loadReplica(d, i.id);
         const state = got ? materialize(got.replica.log) : null;
-        return { ...i, pending: got?.replica.outbox.size ?? 0, conflicts: state?.conflicts.length ?? 0 };
+        let answered = 0, total = 0;
+        if (got && state) {
+          try {
+            ({ answered, total } = progress(renderInspection(got.meta.definition, got.meta.templateVersion, state).sections));
+          } catch {
+            /* not pinned yet on this device: no progress to show */
+          }
+        }
+        return { ...i, pending: got?.replica.outbox.size ?? 0, conflicts: state?.conflicts.length ?? 0, answered, total };
       }),
     );
     setList(rows.filter((r) => !r.gone || r.pending > 0));
@@ -215,6 +223,9 @@ export function FieldApp() {
   const prog = view ? progress(view.rendered.sections) : null;
   const items = view ? view.rendered.sections.flatMap((s) => s.items) : [];
   const conflicted = items.filter((i) => i.conflict);
+  // The server's refusal repeats the local checklist; show only what the device did not already list.
+  const local = new Set((view?.notReady ?? []).map((n) => `${n.label} ${WHY[n.why]}`));
+  const serverOnly = reasons.filter((r) => !local.has(r));
   return (
     <div className="wt-field-app">
       <header className="wt-fhead">
@@ -233,7 +244,7 @@ export function FieldApp() {
             {view ? (
               <span className="wt-pin">Template v{view.rendered.templateVersion} (pinned)</span>
             ) : (
-              org && <a href={`/o/${encodeURIComponent(org)}/inspections`}>Back to {org}</a>
+              org && <a href={`/o/${encodeURIComponent(org)}/inspections`}>Back to {org}{!canNet && ' (needs signal)'}</a>
             )}
           </div>
           <div className={`wt-bar ${canNet ? 'wt-bar-on' : 'wt-bar-off'}`}>
@@ -251,7 +262,7 @@ export function FieldApp() {
             </span>
           </div>
           <div className="wt-controls">
-            <button type="button" aria-pressed={forcedOffline} onClick={toggleOffline}>
+            <button type="button" className={forcedOffline ? 'wt-on' : undefined} onClick={toggleOffline}>
               {forcedOffline ? 'Go online' : 'Go offline'}
             </button>
             <button type="button" onClick={() => void runSync()} disabled={!canNet || !org}>
@@ -280,7 +291,9 @@ export function FieldApp() {
                 <li key={i.id}>
                   <button type="button" className="wt-icard" onClick={() => void open(i.id)}>
                     <span className="wt-icard-title">{i.title}</span>
-                    <span className="wt-icard-meta">Template version {i.templateVersion} (pinned)</span>
+                    <span className="wt-icard-meta">
+                      Template version {i.templateVersion} (pinned) · {i.answered} of {i.total} answered
+                    </span>
                     {i.conflicts > 0 ? (
                       <span className="wt-s wt-s-warn">
                         <span aria-hidden="true">◆ </span>
@@ -294,7 +307,7 @@ export function FieldApp() {
                     ) : (
                       <span className="wt-s wt-s-ok">
                         <span aria-hidden="true">✓ </span>
-                        Nothing waiting
+                        All synced
                       </span>
                     )}
                     {i.gone && <span className="wt-s wt-s-na">No longer assigned to you</span>}
@@ -355,7 +368,7 @@ export function FieldApp() {
                     myDevice={view.meta.deviceId}
                     waiting={view.pendingPaths.has(i.path)}
                     queued={view.queued}
-                    onAnswer={(v) => void write(i.path, v)}
+                    onAnswer={(v) => write(i.path, v)}
                     onPhotos={(files) => void onPhotos(i.path, files)}
                     onRemovePhoto={(h) => void onRemovePhoto(i.path, h)}
                     onSign={(png) => void onSign(i.path, png)}
@@ -393,9 +406,9 @@ export function FieldApp() {
                   <span aria-hidden="true">✓ </span>Everything required is answered.
                 </p>
               )}
-              {reasons.length > 0 && (
+              {serverOnly.length > 0 && (
                 <ul className="wt-todo wt-alert" aria-label="The server says">
-                  {reasons.map((r) => (
+                  {serverOnly.map((r) => (
                     <li key={r}>{r}</li>
                   ))}
                 </ul>
@@ -443,7 +456,7 @@ function Item({
   myDevice: string;
   waiting: boolean;
   queued: ReadonlySet<string>;
-  onAnswer: (v: Json) => void;
+  onAnswer: (v: Json) => Promise<void>;
   onPhotos: (files: File[]) => void;
   onRemovePhoto: (hash: string) => void;
   onSign: (png: Uint8Array) => void;
@@ -456,8 +469,16 @@ function Item({
     </span>
   ) : null;
   // Remount uncontrolled inputs when the merged value changes (a sync brought someone else's answer).
-  const k = `${i.path}:${JSON.stringify(i.value)}`;
+  // Number and text inputs are uncontrolled (one op per blur/Enter, D-28): remount them when the merged value changes.
+  // While the item is in conflict, no value is shown as chosen (Conflict artboard: neither is chosen until you pick).
+  const k = `${i.path}:${JSON.stringify(i.value)}:${i.conflict}`;
   const problem = rangeProblem(it, i.value);
+  // Pass/fail/N/A radios stay mounted (a remount would drop keyboard focus, DX-03); a merged value that changes under
+  // them (a sync, a keep, a conflict) is written to the DOM here. In conflict none is checked (DX-02).
+  const seg = useRef<HTMLDivElement | null>(null);
+  useEffect(() => {
+    for (const r of seg.current?.querySelectorAll('input') ?? []) r.checked = !i.conflict && r.value === i.value;
+  }, [i.value, i.conflict]);
   const saved = i.answered ? (
     <span className="wt-saved">
       {waiting ? (
@@ -472,20 +493,31 @@ function Item({
     </span>
   ) : null;
   const unfit = !i.valid && !problem ? <p className="wt-err">✕ This answer does not fit this item.</p> : null;
-  const resolve = i.conflict ? <Resolve item={i} myDevice={myDevice} blobs={blobs} onKeep={onAnswer} /> : null;
+  const refocus = () => requestAnimationFrame(() => (document.getElementById(id)?.querySelector('input, textarea, button') as HTMLElement | null)?.focus());
+  const resolve = i.conflict ? (
+    <Resolve
+      item={i}
+      myDevice={myDevice}
+      blobs={blobs}
+      onKeep={async (v) => {
+        await onAnswer(v);
+        refocus(); // the resolve group is gone; keep the keyboard on this question
+      }}
+    />
+  ) : null;
   const cls = `wt-q${i.conflict ? ' wt-q-warn' : ''}`;
 
   if (it.type === 'pass_fail_na') {
     return (
-      <fieldset key={k} id={id} className={cls} data-path={i.path}>
+      <fieldset id={id} className={cls} data-path={i.path}>
         <legend className="wt-q-label">
           {it.label}
           {req}
         </legend>
-        <div className="wt-seg">
+        <div className="wt-seg" ref={seg}>
           {PFN.map(([v, l, g]) => (
             <label key={v}>
-              <input type="radio" name={i.path} value={v} defaultChecked={i.value === v} onChange={() => onAnswer(v)} />
+              <input type="radio" name={i.path} value={v} defaultChecked={!i.conflict && i.value === v} onChange={() => void onAnswer(v)} />
               <span aria-hidden="true">{g}</span> {l}
             </label>
           ))}
@@ -499,7 +531,7 @@ function Item({
   if (it.type === 'number' || it.type === 'text') {
     const commit = (raw: string) => {
       const v: Json = raw === '' ? null : it.type === 'number' ? Number(raw) : raw;
-      if (JSON.stringify(v) !== JSON.stringify(i.value) && !(typeof v === 'number' && Number.isNaN(v))) onAnswer(v);
+      if ((i.conflict ? v !== null : JSON.stringify(v) !== JSON.stringify(i.value)) && !(typeof v === 'number' && Number.isNaN(v))) void onAnswer(v);
     };
     const inputId = `${id}-in`;
     const hint = rangeText(it);
@@ -507,7 +539,7 @@ function Item({
     const common = {
       id: inputId,
       'aria-describedby': described,
-      defaultValue: i.value === null ? '' : String(i.value),
+      defaultValue: i.value === null || i.conflict ? '' : String(i.value),
       onBlur: (e: React.FocusEvent<HTMLInputElement | HTMLTextAreaElement>) => commit(e.currentTarget.value),
     };
     return (
@@ -624,7 +656,7 @@ function Item({
  * Pick one of the kept values, then confirm (Conflict artboard). Neither is chosen until the technician picks; the
  * keep writes that value as one op that supersedes every competing head (the same write the old "Keep" button made).
  */
-function Resolve({ item: i, myDevice, blobs, onKeep }: { item: RenderedItem; myDevice: string; blobs: BlobCtx; onKeep: (v: Json) => void }) {
+function Resolve({ item: i, myDevice, blobs, onKeep }: { item: RenderedItem; myDevice: string; blobs: BlobCtx; onKeep: (v: Json) => Promise<void> }) {
   const [picked, setPicked] = useState<string | null>(null);
   const chosen = i.heads.find((h) => h.opId === picked) ?? null;
   return (
@@ -650,7 +682,7 @@ function Resolve({ item: i, myDevice, blobs, onKeep }: { item: RenderedItem; myD
           </span>
         </button>
       ))}
-      <button type="button" className="wt-primary" disabled={!chosen} onClick={() => chosen && onKeep(chosen.value)}>
+      <button type="button" className="wt-primary" disabled={!chosen} onClick={() => chosen && void onKeep(chosen.value)}>
         {chosen ? `Keep ${valueText(i.item, chosen.value)}` : 'Pick a value first'}
       </button>
     </div>
@@ -731,6 +763,13 @@ function SignaturePad({ label, signed, onSave }: { label: string; signed: boolea
   const [typing, setTyping] = useState(false);
   const [name, setName] = useState('');
   const [inked, setInked] = useState(false);
+  // Where the keyboard goes after a mode switch or a save, so it is never thrown to the top of the page.
+  const [focusNext, setFocusNext] = useState<'sign-again' | 'type' | null>(null);
+  const save = (png: Uint8Array) => {
+    onSave(png);
+    setFocusNext('sign-again');
+    setOpen(false);
+  };
   const clear = () => {
     const c = canvas.current;
     if (!c) return;
@@ -749,7 +788,7 @@ function SignaturePad({ label, signed, onSave }: { label: string; signed: boolea
   };
   if (!open)
     return (
-      <button type="button" className="wt-fbtn wt-self-start" onClick={() => setOpen(true)}>
+      <button type="button" className="wt-fbtn wt-self-start" autoFocus={focusNext === 'sign-again'} onClick={() => (setFocusNext(null), setOpen(true))}>
         Sign again
       </button>
     );
@@ -758,7 +797,7 @@ function SignaturePad({ label, signed, onSave }: { label: string; signed: boolea
       <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
         <label className="wt-field" style={{ fontWeight: 600 }}>
           Signer&rsquo;s full name
-          <input className="wt-num" style={{ fontSize: 18, fontWeight: 400 }} value={name} onChange={(e) => setName(e.currentTarget.value)} autoComplete="name" maxLength={80} />
+          <input className="wt-num" style={{ fontSize: 18, fontWeight: 400 }} autoFocus value={name} onChange={(e) => setName(e.currentTarget.value)} autoComplete="name" maxLength={80} />
         </label>
         <span className="wt-note">The typed name is saved as the signature image, the same way a drawn one is.</span>
         <div className="wt-row-btns">
@@ -768,15 +807,12 @@ function SignaturePad({ label, signed, onSave }: { label: string; signed: boolea
             disabled={!name.trim()}
             onClick={async () => {
               const png = await typedSignaturePng(name.trim());
-              if (png) {
-                onSave(png);
-                setOpen(false);
-              }
+              if (png) save(png);
             }}
           >
             Save signature
           </button>
-          <button type="button" className="wt-link-btn" onClick={() => setTyping(false)}>
+          <button type="button" className="wt-link-btn" onClick={() => (setFocusNext('type'), setTyping(false))}>
             Draw instead
           </button>
         </div>
@@ -789,6 +825,7 @@ function SignaturePad({ label, signed, onSave }: { label: string; signed: boolea
           ref={canvas}
           width={PAD_W}
           height={PAD_H}
+          role="img"
           aria-label={`Signature pad: ${label}`}
           className="wt-sigpad"
           onPointerDown={(e) => {
@@ -824,8 +861,7 @@ function SignaturePad({ label, signed, onSave }: { label: string; signed: boolea
           onClick={() =>
             canvas.current?.toBlob(async (b) => {
               if (!b) return;
-              onSave(new Uint8Array(await b.arrayBuffer()));
-              setOpen(false);
+              save(new Uint8Array(await b.arrayBuffer()));
             }, 'image/png')
           }
         >
@@ -834,7 +870,7 @@ function SignaturePad({ label, signed, onSave }: { label: string; signed: boolea
         <button type="button" className="wt-fbtn" onClick={clear}>
           Clear
         </button>
-        <button type="button" className="wt-link-btn" onClick={() => setTyping(true)}>
+        <button type="button" className="wt-link-btn" autoFocus={focusNext === 'type'} onClick={() => (setFocusNext(null), setTyping(true))}>
           Type name instead
         </button>
       </div>

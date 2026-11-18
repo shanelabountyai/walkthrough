@@ -1,0 +1,98 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Inspection detail</title>
+<script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+<style>
+body{margin:0;background:#F3F5F7}
+a{color:#1F4E8A}a:hover{color:#163A68}
+</style>
+</helmet>
+<div style="min-height: 100%; background: #F3F5F7; color: #13202B; font-family: system-ui, -apple-system, 'Segoe UI', sans-serif; font-size: 15px; line-height: 1.45;">
+<header style="background: #13202B; color: #FFFFFF;">
+<div style="max-width: 1200px; margin: 0 auto; padding: 10px 20px; display: flex; flex-wrap: wrap; gap: 12px 24px; align-items: center; justify-content: space-between;">
+<div style="display: flex; align-items: center; gap: 10px;">
+<svg width="28" height="28" viewBox="0 0 30 30" aria-hidden="true"><rect width="30" height="30" rx="7" fill="#F2A33A"/><path d="M8 19h14M10 19v-6l5-4 5 4v6" stroke="#13202B" stroke-width="2.2" fill="none" stroke-linejoin="round"/></svg>
+<span style="font-weight: 700;">Three Forks Heating &amp; Air · Inspections</span>
+</div>
+<nav aria-label="Main" style="display: flex; gap: 18px; font-size: 14px;"><a href="#" style="color: #FFFFFF; font-weight: 600; text-decoration: none; border-bottom: 2px solid #F2A33A; padding: 8px 0;">Inspections</a><a href="#" style="color: #D3DBE3; text-decoration: none; padding: 8px 0;">Templates</a><a href="#" style="color: #D3DBE3; text-decoration: none; padding: 8px 0;">Dispatch (Truckroll)</a></nav>
+</div>
+</header>
+<main style="max-width: 1200px; margin: 0 auto; padding: 22px 20px 48px; display: flex; flex-wrap: wrap; gap: 18px; align-items: flex-start;">
+<div style="flex: 999 1 640px; min-width: 0; display: flex; flex-direction: column; gap: 14px;">
+<div style="display: flex; flex-wrap: wrap; justify-content: space-between; gap: 10px; align-items: flex-end;">
+<div style="display: flex; flex-direction: column; gap: 2px;">
+<span style="font-size: 13px; color: #3F4D5A;">INS-1093 · Customer 0412 · assigned to Dana · started Nov 17, 10:20 AM</span>
+<h1 style="margin: 0; font-size: 24px;">Furnace safety inspection</h1>
+</div>
+<div style="display: flex; gap: 8px; flex-wrap: wrap;">
+<span style="display: inline-flex; align-items: center; gap: 6px; background: #E3E8ED; border-radius: 999px; padding: 4px 12px; font-size: 13px; font-weight: 700;">Template v3 · pinned at creation</span>
+<span style="display: inline-flex; align-items: center; gap: 6px; background: #FFF4E0; color: #5C3A00; border: 1px solid #C77A00; border-radius: 999px; padding: 4px 12px; font-size: 13px; font-weight: 700;">◆ 1 to resolve</span>
+</div>
+</div>
+<section aria-labelledby="ans" style="background: #FFFFFF; border: 1px solid #D5DCE3; border-radius: 12px; overflow: hidden;">
+<h2 id="ans" style="margin: 0; padding: 12px 16px; font-size: 16px; border-bottom: 1px solid #E3E8ED;">Answers</h2>
+<sc-for list="{{rows}}" as="r" hint-placeholder-count="6">
+<div style="display: grid; grid-template-columns: minmax(0, 2fr) minmax(0, 1.4fr) minmax(0, 1fr); gap: 12px; padding: 12px 16px; border-top: 1px solid #EDF0F3; align-items: start; background: {{r.rowBg}};">
+<span style="font-weight: 600;">{{r.q}}</span>
+<div style="display: flex; flex-direction: column; gap: 4px;">
+<span style="font-weight: 700; color: {{r.fg}};"><span aria-hidden="true">{{r.g}}</span> {{r.a}}</span>
+<sc-if value="{{r.conflict}}" hint-placeholder-val="{{false}}">
+<div style="display: flex; flex-direction: column; gap: 6px;">
+<span style="font-size: 13px; color: #3F2800;">Two values kept, neither chosen yet:</span>
+<div style="display: flex; gap: 8px; flex-wrap: wrap;">
+<button type="button" style="min-height: 40px; padding: 0 12px; border-radius: 8px; border: 2px solid #8696A6; background: #FFFFFF; font: inherit; font-weight: 700;">140 · Dana, phone, 10:38</button>
+<button type="button" style="min-height: 40px; padding: 0 12px; border-radius: 8px; border: 2px solid #8696A6; background: #FFFFFF; font: inherit; font-weight: 700;">14 · Shane, desktop, 10:44</button>
+</div>
+</div>
+</sc-if>
+</div>
+<span style="font-size: 13px; color: #3F4D5A;">{{r.meta}}</span>
+</div>
+</sc-for>
+</section>
+</div>
+<aside aria-label="History and report" style="flex: 1 1 300px; min-width: 0; display: flex; flex-direction: column; gap: 14px;">
+<section style="background: #FFFFFF; border: 1px solid #D5DCE3; border-radius: 12px; padding: 14px 16px; display: flex; flex-direction: column; gap: 8px;">
+<h2 style="margin: 0; font-size: 16px;">Sync history</h2>
+<ol style="margin: 0; padding-left: 18px; font-size: 14px; display: flex; flex-direction: column; gap: 6px; color: #3F4D5A;">
+<li>10:20 Dana opened, online (template v3)</li>
+<li>10:31 Dana went offline</li>
+<li>10:38 Dana answered #5 offline: 140</li>
+<li>10:44 Shane edited #5 on desktop: 14</li>
+<li>10:52 Dana's phone synced, 4 changes, 1 photo; conflict on #5 kept</li>
+</ol>
+</section>
+<section style="background: #FFFFFF; border: 1px solid #D5DCE3; border-radius: 12px; padding: 14px 16px; display: flex; flex-direction: column; gap: 10px;">
+<h2 style="margin: 0; font-size: 16px;">Report</h2>
+<span style="font-size: 14px; color: #3F4D5A;">The PDF unlocks once every conflict is resolved and the customer has signed.</span>
+<button type="button" disabled style="min-height: 44px; border-radius: 8px; border: 1px solid #8696A6; background: #E3E8ED; color: #3F4D5A; font: inherit; font-weight: 700;">Download PDF (locked)</button>
+</section>
+</aside>
+</main>
+</div>
+</x-dc>
+<script type="text/x-dc" data-dc-script data-props='{"$preview":{"width":1280,"height":1100}}'>
+class Component extends DCLogic {
+  renderVals() {
+    const pass = { g: '✓', fg: '#1F4E8A' }, fail = { g: '✕', fg: '#B42A0E' }, na = { g: '–', fg: '#3F4D5A' }, warn = { g: '◆', fg: '#5C3A00' };
+    const rows = [
+      { q: '1. Gas shutoff accessible', a: 'Pass', meta: 'Dana · 10:24', ...pass },
+      { q: '2. Heat exchanger visual check', a: 'Pass', meta: 'Dana · 10:27', ...pass },
+      { q: '3. Combustion air adequate', a: 'Not applicable', meta: 'Dana · 10:29 · sealed combustion unit', ...na },
+      { q: '4. Flue draft negative at hood', a: 'Pass', meta: 'Dana · 10:36 (offline)', ...pass },
+      { q: '5. CO in flue (0–100 ppm)', a: 'Needs resolving', meta: 'Edited on two devices', conflict: true, rowBg: '#FFFBF3', ...warn },
+      { q: '6. Photo of analyzer reading', a: '1 photo, uploaded', meta: 'Dana · 10:40 (offline), uploaded 10:52', ...pass },
+      { q: '8. Customer signature', a: 'Not signed yet', meta: 'Waiting on site', g: '○', fg: '#3F4D5A' }
+    ].map((r) => ({ conflict: false, rowBg: '#FFFFFF', ...r }));
+    return { rows };
+  }
+}
+</script>
+</body>
+</html>

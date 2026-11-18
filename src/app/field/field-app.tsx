@@ -34,6 +34,9 @@ export function FieldApp() {
   const syncing = useRef(false);
   const wantOpen = useRef<string | null>(null); // ?open=<id>: the office's "Resolve in the field app" link
   const heading = useRef<HTMLHeadingElement | null>(null);
+  // The open inspection for callbacks that outlive a render (the 30 s sync interval keeps the runSync it started with):
+  // a sync that finishes after the technician opened an inspection must refresh that one, not close it.
+  const openRef = useRef<string | null>(null);
   const canNet = online && !forcedOffline;
 
   const refresh = useCallback(async (d: IDBDatabase, id: string | null) => {
@@ -116,9 +119,9 @@ export function FieldApp() {
       } else setStatus(r.error === 'signed-out' ? 'Signed out: sign in to sync. Your answers stay on this device.' : `Sync failed (${r.error}). Your answers stay on this device.`);
     } finally {
       syncing.current = false;
-      await refresh(db, openId);
+      await refresh(db, openRef.current);
     }
-  }, [db, org, canNet, refresh, openId]);
+  }, [db, org, canNet, refresh]);
 
   // Sync when the app opens, whenever it comes back online, and every 30 s while online.
   useEffect(() => {
@@ -126,7 +129,7 @@ export function FieldApp() {
     void runSync();
     const t = setInterval(() => void runSync(), 30_000);
     return () => clearInterval(t);
-  }, [canNet, db, org]); // eslint-disable-line react-hooks/exhaustive-deps -- runSync changes with openId; a new interval per open is not wanted
+  }, [canNet, db, org]); // eslint-disable-line react-hooks/exhaustive-deps -- one interval per connection state; runSync reads the open inspection from openRef
 
   /** Push this inspection's ops, then its photos and signatures (ops first: the server only takes named blobs). */
   const pushNow = async (id: string) => {
@@ -191,6 +194,7 @@ export function FieldApp() {
   };
 
   const open = async (id: string | null) => {
+    openRef.current = id;
     setOpenId(id);
     if (db) await refresh(db, id);
     requestAnimationFrame(() => heading.current?.focus()); // a screen reader hears where it landed

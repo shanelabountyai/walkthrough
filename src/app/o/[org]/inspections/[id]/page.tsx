@@ -105,8 +105,8 @@ export default async function InspectionPage({ params }: { params: Promise<{ org
               {conflictCount} answer{conflictCount === 1 ? '' : 's'} need{conflictCount === 1 ? 's' : ''} resolving
             </strong>
             <p>
-              Two devices changed the same answer. Both values are kept; nothing was overwritten. Whoever picks first, the other value stays in the
-              history. Resolve: {conflictCount} field{conflictCount === 1 ? '' : 's'} have conflicting answers.
+              Two devices changed the same answer. Both values are kept; nothing was overwritten. Resolve: pick one value in the field app. Whoever
+              picks first wins, and the other value stays in the history.
             </p>
             <a href={field}>Resolve in the field app</a>
           </section>

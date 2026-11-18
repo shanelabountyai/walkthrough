@@ -233,3 +233,4 @@ a.wt-primary:hover { color: #fff; background: var(--wt-blue-dark); }
 .wt-finish h2 { margin: 0; font-size: 17px; }
 .wt-todo { margin: 0; padding-left: 20px; font-size: 14px; display: flex; flex-direction: column; gap: 4px; }
 .wt-offtpl { font-size: 14px; }
+h1[tabindex='-1']:focus { outline: none; }

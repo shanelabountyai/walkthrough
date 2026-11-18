@@ -29,6 +29,8 @@ Each file is a self-contained Design Component: HTML with inline styles, `{{hole
 
 Design each gap as a new `docs/design/<Name>.dc.html` in the same look before building it.
 
+Gap designs added 2026-11-18 (design pass, Claude, owner away): `FieldList.dc.html` (field: my inspections), `InspectionsList.dc.html` (office: inspections + new inspection), `Templates.dc.html` (office: templates + new template), `TemplateEditor.dc.html` (office: template versions + publish), `Report.dc.html` (PDF report page). They use `[placeholders]` only; the app fills real data.
+
 ## Placeholders
 
 [Synthetic address] and [photo] are placeholders.

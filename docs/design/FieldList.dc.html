@@ -1,0 +1,72 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>My inspections (field)</title>
+<script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+<style>body{margin:0}</style>
+</helmet>
+<!-- Gap design (2026-11-18): the field app's first screen, the inspections assigned to me on this phone. Same look as Main.dc.html. -->
+<div style="width: 390px; min-height: 900px; box-sizing: border-box; background: #F3F5F7; color: #13202B; font-family: system-ui, -apple-system, 'Segoe UI', sans-serif; font-size: 16px; line-height: 1.45; display: flex; flex-direction: column;">
+<header style="background: #13202B; color: #FFFFFF; padding: 12px 16px; display: flex; flex-direction: column; gap: 8px;">
+<div style="display: flex; justify-content: space-between; align-items: center;">
+<span style="font-weight: 700;">Walkthrough</span>
+<a href="#" style="font-size: 14px; color: #FFFFFF; min-height: 44px; display: inline-flex; align-items: center;">Back to [org]</a>
+</div>
+<div style="display: flex; align-items: center; justify-content: space-between; gap: 10px; background: {{barBg}}; color: {{barFg}}; border-radius: 10px; padding: 8px 12px;">
+<span style="display: flex; align-items: center; gap: 8px; font-weight: 700;"><span aria-hidden="true">{{barGlyph}}</span><span role="status">{{barWord}}</span></span>
+<span style="font-size: 13px;">{{barNote}}</span>
+</div>
+<div style="display: flex; gap: 8px;">
+<button type="button" aria-pressed="{{offline}}" onClick="{{toggle}}" style="flex: 1; min-height: 44px; border-radius: 10px; border: 2px solid #F2A33A; background: {{toggleBg}}; color: {{toggleFg}}; font: inherit; font-size: 14px; font-weight: 700;">{{toggleLabel}}</button>
+<button type="button" disabled="{{offline}}" style="flex: 1; min-height: 44px; border-radius: 10px; border: 2px solid #D3DBE3; background: transparent; color: #FFFFFF; font: inherit; font-size: 14px; font-weight: 700;">Sync now</button>
+</div>
+<span style="font-size: 13px; color: #D3DBE3;">Demo toggle: stops every network call, like a basement with no signal.</span>
+</header>
+<main style="padding: 16px; display: flex; flex-direction: column; gap: 12px;">
+<h1 style="margin: 0; font-size: 20px;">My inspections</h1>
+<p style="margin: 0; font-size: 14px; color: #3F4D5A;">Assigned to you and saved on this phone. They open without signal.</p>
+<sc-for list="{{rows}}" as="r" hint-placeholder-count="3">
+<button type="button" style="min-height: 76px; border-radius: 14px; border: 1px solid #D5DCE3; background: #FFFFFF; color: #13202B; font: inherit; text-align: left; padding: 12px 14px; display: flex; flex-direction: column; gap: 4px; cursor: pointer;">
+<span style="font-size: 17px; font-weight: 700;">{{r.title}}</span>
+<span style="font-size: 13px; color: #3F4D5A;">{{r.template}}</span>
+<span style="font-size: 14px; font-weight: 700; color: {{r.fg}};"><span aria-hidden="true">{{r.g}}</span> {{r.state}}</span>
+</button>
+</sc-for>
+<p style="margin: 0; font-size: 13px; color: #3F4D5A;">Empty: "None yet. Inspections assigned to you download the first time you open this page online." No org remembered: "Open the field app from your org's Inspections page once while online."</p>
+</main>
+</div>
+</x-dc>
+<script type="text/x-dc" data-dc-script data-props='{"$preview":{"width":390,"height":900}}'>
+class Component extends DCLogic {
+  constructor(p) { super(p); this.state = { offline: false }; }
+  renderVals() {
+    const off = this.state.offline;
+    const warn = { g: '◆', fg: '#5C3A00' }, wait = { g: '○', fg: '#6B4600' }, ok = { g: '✓', fg: '#1F4E8A' }, gone = { g: '–', fg: '#3F4D5A' };
+    return {
+      offline: off,
+      toggle: () => this.setState({ offline: !off }),
+      toggleLabel: off ? 'Go online' : 'Go offline',
+      toggleBg: off ? '#F2A33A' : 'transparent',
+      toggleFg: off ? '#13202B' : '#FFFFFF',
+      barBg: off ? '#F2A33A' : '#D9E6F5',
+      barFg: off ? '#13202B' : '#163A68',
+      barGlyph: off ? '○' : '✓',
+      barWord: off ? 'Offline (demo toggle)' : 'Online',
+      barNote: '[n] changes waiting to sync · [n] photos waiting to upload',
+      rows: [
+        { title: '[Inspection title]', template: '[Template] · version [n] (pinned)', state: '[n] to resolve', ...warn },
+        { title: '[Inspection title]', template: '[Template] · version [n] (pinned)', state: '[n] waiting to sync', ...wait },
+        { title: '[Inspection title]', template: '[Template] · version [n] (pinned)', state: 'All synced', ...ok },
+        { title: '[Inspection title]', template: '[Template] · version [n] (pinned)', state: 'No longer assigned to you · [n] waiting to sync', ...gone }
+      ]
+    };
+  }
+}
+</script>
+</body>
+</html>

@@ -19,12 +19,12 @@ export function CompleteButton({ org, id, label }: { org: string; id: string; la
     }
   };
   return (
-    <div>
-      <button type="button" onClick={() => void run()} disabled={busy}>
-        {label}
+    <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+      <button type="button" className="wt-btn" onClick={() => void run()} disabled={busy} aria-busy={busy}>
+        {busy ? 'Generating the report…' : label}
       </button>
       {msg.length > 0 && (
-        <ul role="alert">
+        <ul role="alert" className="wt-alert wt-list" style={{ listStyle: 'none', paddingLeft: 12 }}>
           {msg.map((m) => (
             <li key={m}>{m}</li>
           ))}

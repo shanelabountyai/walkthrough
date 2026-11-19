@@ -151,26 +151,50 @@ export async function buildPdf(input: ReportInput): Promise<Uint8Array> {
   for (const s of input.rendered.sections) for (const i of s.items) if (i.item.type === 'signature' && i.value !== null) bindings.set(i.path, await bindingOf(i.value, input.rendered));
   const stale = [...input.rendered.sections.flatMap((s) => s.items)].filter((i) => bindings.get(i.path)?.status === 'changed');
 
+  // Design pass 2026-11-18 (docs/design/Report.dc.html): a navy band with an amber rule, then the facts, then the
+  // sections. Layout only: what the report says, and when it may be built, is unchanged (D-32, D-41).
+  const NAVY: [number, number, number] = [0.075, 0.125, 0.169];
+  const ON_NAVY: [number, number, number] = [0.83, 0.86, 0.89];
+  const MUTED: [number, number, number] = [0.25, 0.3, 0.35];
   newPage();
-  text(input.title, { font: bold, size: 20 });
-  y -= 4;
+  const templateLine = `${input.templateName}, template version ${input.rendered.templateVersion} (pinned when the inspection was created)`;
+  const bandH = 26 + 14 + wrap(input.title, bold, 20, W - 2 * M).length * 24 + wrap(templateLine, regular, 10, W - 2 * M).length * 14 + 12;
+  page.drawRectangle({ x: 0, y: H - bandH, width: W, height: bandH, color: rgb(...NAVY) });
+  page.drawRectangle({ x: 0, y: H - bandH - 5, width: W, height: 5, color: rgb(0.949, 0.639, 0.227) });
+  y = H - 24;
+  text(`Walkthrough · Inspection report ${input.number}`, { font: bold, size: 10, color: ON_NAVY });
+  y -= 2;
+  text(input.title, { font: bold, size: 20, color: [1, 1, 1] });
+  text(templateLine, { size: 10, color: ON_NAVY });
+  y = H - bandH - 5 - 16;
+  const all = input.rendered.sections.flatMap((s) => s.items);
+  const count = (v: string) => all.filter((i) => i.item.type === 'pass_fail_na' && i.value === v).length;
   text(`Inspection report ${input.number}`, { font: bold, size: 13 });
-  text(`${input.templateName}, template version ${input.rendered.templateVersion} (pinned when the inspection was created)`);
   text(`Technician: ${input.technician}`);
   text(`Completed by ${input.completedBy} on ${input.generatedAt.toISOString().replace('T', ' ').slice(0, 16)} UTC`);
-  text(`Inspection ${input.inspectionId} · built from the op log through seq ${input.opSeq}`, { size: 9, color: [0.35, 0.35, 0.35] });
-  text(`Dispatch day in Truckroll: ${input.truckroll}`, { size: 9, color: [0.35, 0.35, 0.35] });
+  text(`Result: ${count('pass')} pass · ${count('fail')} fail · ${count('na')} N/A`);
+  text(`Inspection ${input.inspectionId} · built from the op log through seq ${input.opSeq}`, { size: 9, color: MUTED });
+  text(`Dispatch day in Truckroll: ${input.truckroll}`, { size: 9, color: MUTED });
   if (stale.length) {
     y -= 6;
     text(`ANSWERS CHANGED AFTER SIGNING: ${stale.map((i) => i.item.label).join(', ')} no longer cover${stale.length === 1 ? 's' : ''} the answers below (D-41).`, { font: bold, color: [0.75, 0, 0] });
   }
+  const TONE: Record<string, [number, number, number]> = { pass: [0.122, 0.306, 0.541], fail: [0.706, 0.165, 0.055], na: MUTED };
   for (const s of input.rendered.sections) {
-    y -= 10;
-    text(s.title, { font: bold, size: 15 });
+    y -= 12;
+    room(15 + 4 + 8);
+    text(s.title, { font: bold, size: 15, color: NAVY });
+    page.drawLine({ start: { x: M, y: y + 1 }, end: { x: W - M, y: y + 1 }, thickness: 1.5, color: rgb(...NAVY) });
+    y -= 4;
     for (const i of s.items) {
       y -= 2;
       text(`${i.item.label}${i.item.required ? ' *' : ''}`, { font: bold });
-      text(answerText(i, bindings.get(i.path)), { indent: 12, ...(bindings.get(i.path)?.status === 'changed' ? { font: bold, color: [0.75, 0, 0] as [number, number, number] } : {}) });
+      const tone = i.item.type === 'pass_fail_na' && typeof i.value === 'string' ? TONE[i.value] : undefined;
+      text(answerText(i, bindings.get(i.path)), {
+        indent: 12,
+        ...(tone ? { font: bold, color: tone } : {}),
+        ...(bindings.get(i.path)?.status === 'changed' ? { font: bold, color: [0.75, 0, 0] as [number, number, number] } : {}),
+      });
       if (i.item.type === 'photo') await images(refsIn(i.value), 240, 180);
       if (i.item.type === 'signature' && i.value !== null) await images(refsIn(i.value), 240, 100);
     }

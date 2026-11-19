@@ -1,0 +1,93 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Inspection checklist</title>
+<script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+<style>body{margin:0}</style>
+</helmet>
+<div style="width: 390px; min-height: 1300px; box-sizing: border-box; background: #F3F5F7; color: #13202B; font-family: system-ui, -apple-system, 'Segoe UI', sans-serif; font-size: 16px; line-height: 1.45; display: flex; flex-direction: column;">
+<header style="background: #13202B; color: #FFFFFF; padding: 12px 16px; display: flex; flex-direction: column; gap: 8px;">
+<div style="display: flex; justify-content: space-between; align-items: center;">
+<span style="font-weight: 700;">Furnace safety inspection</span>
+<span style="font-size: 13px; color: #D3DBE3;">Template v3 (pinned)</span>
+</div>
+<div role="status" style="display: flex; align-items: center; justify-content: space-between; gap: 10px; background: {{barBg}}; color: {{barFg}}; border-radius: 10px; padding: 8px 12px;">
+<span style="display: flex; align-items: center; gap: 8px; font-weight: 700;"><span aria-hidden="true">{{barGlyph}}</span>{{barWord}}</span>
+<span style="font-size: 13px;">{{barNote}}</span>
+</div>
+<label style="display: flex; align-items: center; justify-content: space-between; min-height: 44px; font-size: 14px; color: #D3DBE3; cursor: pointer;">
+<span>Demo: go offline</span>
+<input type="checkbox" checked="{{offline}}" onChange="{{toggle}}" style="width: 22px; height: 22px; accent-color: #F2A33A;">
+</label>
+</header>
+<main style="padding: 16px; display: flex; flex-direction: column; gap: 14px;">
+<div style="display: flex; justify-content: space-between; font-size: 14px; color: #3F4D5A;"><span>[Synthetic address] · Customer 0412</span><span>5 of 8 answered</span></div>
+
+<section aria-labelledby="q1" style="background: #FFFFFF; border: 1px solid #D5DCE3; border-radius: 14px; padding: 14px; display: flex; flex-direction: column; gap: 10px;">
+<h2 id="q1" style="margin: 0; font-size: 17px;">4. Flue draft is negative at the draft hood</h2>
+<div role="radiogroup" aria-labelledby="q1" style="display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 8px;">
+<button type="button" aria-pressed="true" style="min-height: 56px; border-radius: 10px; border: 3px solid #1F4E8A; background: #1F4E8A; color: #FFFFFF; font: inherit; font-weight: 700;">✓ Pass</button>
+<button type="button" aria-pressed="false" style="min-height: 56px; border-radius: 10px; border: 2px solid #8696A6; background: #FFFFFF; color: #13202B; font: inherit; font-weight: 700;">✕ Fail</button>
+<button type="button" aria-pressed="false" style="min-height: 56px; border-radius: 10px; border: 2px solid #8696A6; background: #FFFFFF; color: #13202B; font: inherit; font-weight: 700;">– N/A</button>
+</div>
+<span style="font-size: 13px; color: #3F4D5A;">{{saved}}</span>
+</section>
+
+<section aria-labelledby="q2" style="background: #FFFFFF; border: 1px solid #D5DCE3; border-radius: 14px; padding: 14px; display: flex; flex-direction: column; gap: 8px;">
+<label id="q2" for="co" style="font-size: 17px; font-weight: 700;">5. CO in flue (ppm) <span style="font-weight: 400; font-size: 14px; color: #3F4D5A;">allowed 0–100</span></label>
+<input id="co" type="number" value="140" inputmode="numeric" style="min-height: 56px; box-sizing: border-box; border: 2px solid #B42A0E; border-radius: 10px; padding: 0 14px; font: inherit; font-size: 22px; font-weight: 700;">
+<span role="alert" style="font-size: 14px; color: #8A1E08; font-weight: 600;">✕ 140 is above the allowed range. Take a photo of the analyzer reading.</span>
+</section>
+
+<section aria-labelledby="q3" style="background: #FFFFFF; border: 1px solid #D5DCE3; border-radius: 14px; padding: 14px; display: flex; flex-direction: column; gap: 10px;">
+<h2 id="q3" style="margin: 0; font-size: 17px;">6. Photo of analyzer reading <span style="font-weight: 400; font-size: 14px; color: #B42A0E;">required</span></h2>
+<div style="display: flex; gap: 10px; align-items: center;">
+<div aria-label="Photo placeholder: analyzer reading" role="img" style="width: 88px; height: 88px; border-radius: 10px; background: #D5DCE3; display: flex; align-items: center; justify-content: center; font-size: 12px; color: #3F4D5A; text-align: center;">[photo]</div>
+<div style="display: flex; flex-direction: column; gap: 2px;">
+<span style="font-weight: 700; color: {{photoFg}};"><span aria-hidden="true">{{photoGlyph}}</span> {{photoWord}}</span>
+<span style="font-size: 13px; color: #3F4D5A;">{{photoNote}}</span>
+</div>
+</div>
+<button type="button" style="min-height: 52px; border-radius: 10px; border: 2px solid #1F4E8A; background: #FFFFFF; color: #1F4E8A; font: inherit; font-weight: 700;">Add another photo</button>
+</section>
+
+<section aria-labelledby="q4" style="background: #FFFFFF; border: 1px solid #D5DCE3; border-radius: 14px; padding: 14px; display: flex; flex-direction: column; gap: 10px;">
+<h2 id="q4" style="margin: 0; font-size: 17px;">8. Customer signature</h2>
+<div aria-label="Signature pad" role="img" style="height: 120px; border: 2px dashed #8696A6; border-radius: 10px; display: flex; align-items: center; justify-content: center; color: #3F4D5A;">Sign here with a finger</div>
+<a href="#q4" style="min-height: 44px; display: inline-flex; align-items: center; color: #1F4E8A; font-weight: 600;">Type name instead</a>
+</section>
+
+<a href="Conflict.dc.html" style="min-height: 56px; display: flex; align-items: center; justify-content: center; border-radius: 12px; background: #1F4E8A; color: #FFFFFF; font-weight: 700; text-decoration: none;">Finish inspection</a>
+<p style="margin: 0; font-size: 13px; color: #3F4D5A;">Everything you enter is saved on this phone first. It uploads on its own when you have signal.</p>
+</main>
+</div>
+</x-dc>
+<script type="text/x-dc" data-dc-script data-props='{"$preview":{"width":390,"height":1300}}'>
+class Component extends DCLogic {
+  constructor(p) { super(p); this.state = { offline: true }; }
+  renderVals() {
+    const off = this.state.offline;
+    return {
+      offline: off,
+      toggle: () => this.setState({ offline: !off }),
+      barBg: off ? '#F2A33A' : '#D9E6F5',
+      barFg: off ? '#13202B' : '#163A68',
+      barGlyph: off ? '○' : '✓',
+      barWord: off ? 'Offline · saved on phone' : 'Synced',
+      barNote: off ? '3 answers, 1 photo waiting' : 'All uploaded 10:52',
+      saved: off ? 'Saved on this phone · waiting to upload' : 'Saved and uploaded',
+      photoGlyph: off ? '◐' : '✓',
+      photoWord: off ? 'Waiting to upload' : 'Uploaded',
+      photoFg: off ? '#6B4600' : '#1F4E8A',
+      photoNote: off ? '2.4 MB · uploads in pieces when you have signal' : '2.4 MB · done'
+    };
+  }
+}
+</script>
+</body>
+</html>

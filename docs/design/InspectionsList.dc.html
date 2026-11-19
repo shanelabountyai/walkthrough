@@ -1,0 +1,76 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Inspections</title>
+<script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+<style>
+body{margin:0;background:#F3F5F7}
+a{color:#1F4E8A}a:hover{color:#163A68}
+</style>
+</helmet>
+<!-- Gap design (2026-11-18): office inspections list (managers see the org's; technicians see "My inspections") and the new-inspection form. -->
+<div style="min-height: 100%; background: #F3F5F7; color: #13202B; font-family: system-ui, -apple-system, 'Segoe UI', sans-serif; font-size: 15px; line-height: 1.45;">
+<header style="background: #13202B; color: #FFFFFF;">
+<div style="max-width: 1200px; margin: 0 auto; padding: 10px 20px; display: flex; flex-wrap: wrap; gap: 12px 24px; align-items: center; justify-content: space-between;">
+<div style="display: flex; align-items: center; gap: 10px;">
+<svg width="28" height="28" viewBox="0 0 30 30" aria-hidden="true"><rect width="30" height="30" rx="7" fill="#F2A33A"/><path d="M8 19h14M10 19v-6l5-4 5 4v6" stroke="#13202B" stroke-width="2.2" fill="none" stroke-linejoin="round"/></svg>
+<span style="font-weight: 700;">[Org name] · Inspections</span>
+</div>
+<nav aria-label="Main" style="display: flex; gap: 18px; font-size: 14px;"><a href="#" aria-current="page" style="color: #FFFFFF; font-weight: 600; text-decoration: none; border-bottom: 2px solid #F2A33A; padding: 8px 0;">Inspections</a><a href="#" style="color: #D3DBE3; text-decoration: none; padding: 8px 0;">Templates</a><a href="#" style="color: #D3DBE3; text-decoration: none; padding: 8px 0;">Field app</a><a href="#" style="color: #D3DBE3; text-decoration: none; padding: 8px 0;">Dispatch (Truckroll)</a><details style="position: relative;"><summary style="cursor: pointer; padding: 8px 0; color: #D3DBE3; min-height: 24px;">Settings</summary></details></nav>
+</div>
+</header>
+
+<main style="max-width: 1200px; margin: 0 auto; padding: 22px 20px 48px; display: flex; flex-wrap: wrap; gap: 18px; align-items: flex-start;">
+<div style="flex: 999 1 640px; min-width: 0; display: flex; flex-direction: column; gap: 14px;">
+<div style="display: flex; flex-wrap: wrap; justify-content: space-between; gap: 10px; align-items: flex-end;">
+<h1 style="margin: 0; font-size: 24px;">Inspections</h1>
+<a href="#" style="min-height: 44px; display: inline-flex; align-items: center; padding: 0 16px; border-radius: 8px; border: 2px solid #1F4E8A; color: #1F4E8A; font-weight: 700; text-decoration: none;">Open the field app</a>
+</div>
+<section aria-labelledby="list" style="background: #FFFFFF; border: 1px solid #D5DCE3; border-radius: 12px; overflow: hidden;">
+<h2 id="list" style="margin: 0; padding: 12px 16px; font-size: 16px; border-bottom: 1px solid #E3E8ED;">[n] inspections</h2>
+<div style="display: grid; grid-template-columns: minmax(0, 2fr) minmax(0, 1.4fr) minmax(0, 1.2fr) minmax(0, 1fr); gap: 12px; padding: 8px 16px; font-size: 13px; font-weight: 700; color: #3F4D5A; background: #F3F5F7;"><span>Inspection</span><span>Template</span><span>Technician</span><span>Status</span></div>
+<sc-for list="{{rows}}" as="r" hint-placeholder-count="4">
+<div style="display: grid; grid-template-columns: minmax(0, 2fr) minmax(0, 1.4fr) minmax(0, 1.2fr) minmax(0, 1fr); gap: 12px; padding: 12px 16px; border-top: 1px solid #EDF0F3; align-items: center; background: {{r.rowBg}};">
+<a href="#" style="font-weight: 700; min-height: 24px;">{{r.title}}</a>
+<span style="font-size: 14px;">{{r.template}}</span>
+<span style="font-size: 14px; color: #3F4D5A;">{{r.who}}</span>
+<span style="font-weight: 700; font-size: 14px; color: {{r.fg}};"><span aria-hidden="true">{{r.g}}</span> {{r.state}}</span>
+</div>
+</sc-for>
+</section>
+<p style="margin: 0; font-size: 13px; color: #3F4D5A;">Empty: "No inspections yet." A technician sees only the inspections assigned to them (heading "My inspections", no Technician column, no form).</p>
+</div>
+<aside aria-label="New inspection" style="flex: 1 1 300px; min-width: 0;">
+<section aria-labelledby="new" style="background: #FFFFFF; border: 1px solid #D5DCE3; border-radius: 12px; padding: 14px 16px; display: flex; flex-direction: column; gap: 12px;">
+<h2 id="new" style="margin: 0; font-size: 16px;">New inspection</h2>
+<label style="display: flex; flex-direction: column; gap: 4px; font-weight: 600;">Title<input style="min-height: 44px; box-sizing: border-box; border: 2px solid #8696A6; border-radius: 8px; padding: 0 12px; font: inherit; background: #FFFFFF; color: #13202B;" value="[Inspection title]"></label>
+<label style="display: flex; flex-direction: column; gap: 4px; font-weight: 600;">Template<select style="min-height: 44px; box-sizing: border-box; border: 2px solid #8696A6; border-radius: 8px; padding: 0 12px; font: inherit; background: #FFFFFF; color: #13202B;"><option>[Template]</option></select></label>
+<label style="display: flex; flex-direction: column; gap: 4px; font-weight: 600;">Technician<select style="min-height: 44px; box-sizing: border-box; border: 2px solid #8696A6; border-radius: 8px; padding: 0 12px; font: inherit; background: #FFFFFF; color: #13202B;"><option>[member email]</option></select></label>
+<span style="font-size: 13px; color: #3F4D5A;">The inspection keeps the template's latest version for good. A new version later never changes it.</span>
+<button type="button" style="min-height: 44px; padding: 0 18px; border-radius: 8px; border: none; background: #1F4E8A; color: #FFFFFF; font: inherit; font-weight: 700; cursor: pointer;">Create inspection</button>
+</section>
+</aside>
+</main>
+</div>
+</x-dc>
+<script type="text/x-dc" data-dc-script data-props='{"$preview":{"width":1280,"height":900}}'>
+class Component extends DCLogic {
+  renderVals() {
+    const warn = { g: '◆', fg: '#5C3A00' }, open = { g: '○', fg: '#3F4D5A' }, done = { g: '✓', fg: '#1F4E8A' };
+    const rows = [
+      { title: '[Inspection title]', template: '[Template] v[n]', who: '[member email]', state: '[n] to resolve', rowBg: '#FFFBF3', ...warn },
+      { title: '[Inspection title]', template: '[Template] v[n]', who: '[member email]', state: 'Open', ...open },
+      { title: '[Inspection title]', template: '[Template] v[n]', who: '[member email]', state: 'Report [n]', ...done },
+      { title: '[Inspection title]', template: '[Template] v[n]', who: 'former member', state: 'Open', ...open }
+    ].map((r) => ({ rowBg: '#FFFFFF', ...r }));
+    return { rows };
+  }
+}
+</script>
+</body>
+</html>

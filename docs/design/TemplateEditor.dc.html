@@ -1,0 +1,73 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Template versions</title>
+<script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+<style>
+body{margin:0;background:#F3F5F7}
+a{color:#1F4E8A}a:hover{color:#163A68}
+</style>
+</helmet>
+<!-- Gap design (2026-11-18): one template — its versions (newest first, what each contains) and publishing version n+1 from the JSON definition (D-17). Each publish is immutable; inspections keep their pinned version (WT-04). -->
+<div style="min-height: 100%; background: #F3F5F7; color: #13202B; font-family: system-ui, -apple-system, 'Segoe UI', sans-serif; font-size: 15px; line-height: 1.45;">
+<header style="background: #13202B; color: #FFFFFF;">
+<div style="max-width: 1200px; margin: 0 auto; padding: 10px 20px; display: flex; flex-wrap: wrap; gap: 12px 24px; align-items: center; justify-content: space-between;">
+<div style="display: flex; align-items: center; gap: 10px;">
+<svg width="28" height="28" viewBox="0 0 30 30" aria-hidden="true"><rect width="30" height="30" rx="7" fill="#F2A33A"/><path d="M8 19h14M10 19v-6l5-4 5 4v6" stroke="#13202B" stroke-width="2.2" fill="none" stroke-linejoin="round"/></svg>
+<span style="font-weight: 700;">[Org name] · Inspections</span>
+</div>
+<nav aria-label="Main" style="display: flex; gap: 18px; font-size: 14px;"><a href="#" style="color: #D3DBE3; text-decoration: none; padding: 8px 0;">Inspections</a><a href="#" aria-current="page" style="color: #FFFFFF; font-weight: 600; text-decoration: none; border-bottom: 2px solid #F2A33A; padding: 8px 0;">Templates</a><a href="#" style="color: #D3DBE3; text-decoration: none; padding: 8px 0;">Field app</a><a href="#" style="color: #D3DBE3; text-decoration: none; padding: 8px 0;">Dispatch (Truckroll)</a><details style="position: relative;"><summary style="cursor: pointer; padding: 8px 0; color: #D3DBE3; min-height: 24px;">Settings</summary></details></nav>
+</div>
+</header>
+
+<main style="max-width: 1200px; margin: 0 auto; padding: 22px 20px 48px; display: flex; flex-wrap: wrap; gap: 18px; align-items: flex-start;">
+<div style="flex: 999 1 640px; min-width: 0; display: flex; flex-direction: column; gap: 14px;">
+<div style="display: flex; flex-direction: column; gap: 2px;">
+<a href="#" style="font-size: 14px; min-height: 24px;">← Checklist templates</a>
+<h1 style="margin: 0; font-size: 24px;">[Template name]</h1>
+<span style="font-size: 14px; color: #3F4D5A;">[n] versions · [n] inspections. Each inspection keeps the version it was created on.</span>
+</div>
+<section aria-labelledby="pub" style="background: #FFFFFF; border: 1px solid #D5DCE3; border-radius: 12px; padding: 14px 16px; display: flex; flex-direction: column; gap: 12px;">
+<h2 id="pub" style="margin: 0; font-size: 16px;">Publish version [n+1]</h2>
+<span style="font-size: 14px; color: #3F4D5A;">Starts from version [n]. Publishing makes a new version; version [n] and every inspection pinned to it stay as they are.</span>
+<label style="display: flex; flex-direction: column; gap: 4px; font-weight: 600;">Definition (JSON)<textarea rows="18" style="min-height: 44px; box-sizing: border-box; border: 2px solid #8696A6; border-radius: 8px; padding: 0 12px; font: inherit; background: #FFFFFF; color: #13202B; padding: 10px 12px; font-family: ui-monospace, Menlo, Consolas, monospace; font-size: 13px;">{"sections": [ ... ]}</textarea></label>
+<p role="alert" style="margin: 0; padding: 10px 12px; border-radius: 8px; background: #FDECEA; border: 1px solid #B42A0E; color: #8A1E08; font-weight: 600;">✕ [validation message, e.g. sections.0.items.2: A number item needs min ≤ max.]</p>
+<button type="button" style="min-height: 44px; padding: 0 18px; border-radius: 8px; border: none; background: #1F4E8A; color: #FFFFFF; font: inherit; font-weight: 700; cursor: pointer; align-self: flex-start;">Publish new version</button>
+</section>
+</div>
+<aside aria-label="Versions" style="flex: 1 1 300px; min-width: 0;">
+<section aria-labelledby="vers" style="background: #FFFFFF; border: 1px solid #D5DCE3; border-radius: 12px; padding: 14px 16px; display: flex; flex-direction: column; gap: 10px;">
+<h2 id="vers" style="margin: 0; font-size: 16px;">Versions</h2>
+<ol reversed style="margin: 0; padding: 0; list-style: none; display: flex; flex-direction: column; gap: 10px;">
+<sc-for list="{{vers}}" as="v" hint-placeholder-count="3">
+<li style="border: 1px solid #E3E8ED; border-radius: 10px; padding: 10px 12px; display: flex; flex-direction: column; gap: 2px;">
+<span style="font-weight: 700;">{{v.title}}</span>
+<span style="font-size: 13px; color: #3F4D5A;">{{v.meta}}</span>
+<span style="font-size: 13px; color: #3F4D5A;">{{v.shape}}</span>
+</li>
+</sc-for>
+</ol>
+</section>
+</aside>
+</main>
+</div>
+</x-dc>
+<script type="text/x-dc" data-dc-script data-props='{"$preview":{"width":1280,"height":1000}}'>
+class Component extends DCLogic {
+  renderVals() {
+    const vers = [
+      { title: 'Version [n] · latest', meta: 'published [date time] · [n] inspections', shape: '[n] sections · [n] items · [n] required' },
+      { title: 'Version [n-1]', meta: 'published [date time] · [n] inspections', shape: '[n] sections · [n] items · [n] required' },
+      { title: 'Version 1', meta: 'published [date time] · [n] inspections', shape: '[n] sections · [n] items · [n] required' }
+    ];
+    return { vers };
+  }
+}
+</script>
+</body>
+</html>
